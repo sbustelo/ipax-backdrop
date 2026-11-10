@@ -76,3 +76,7 @@ The contrast model (`ipax-backdrop:contrast`) is **not** meant to be replaced in
 ## Keep the two kernels equal
 
 If you change anything in `3100-kernel-cpu.js` that is not just a call to `0110-util-contrast.js`, make the same change in `3210-kernel-webgl-shaders.js`, then compare both backends on the same input: pixel values must agree within 1 level per channel (rounding) once the WebGL result, which is premultiplied, is compared with the CPU one premultiplied. The table of paired pieces is in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+_IPAX Backdrop v0.1.02 • 2026-11-10 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

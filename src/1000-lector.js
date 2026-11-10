@@ -42,17 +42,63 @@
 		return Array.from(found).filter((el) => el.parentNode && !el.closest(N.layerTag));
 	}
 
+	function parseFeather(shorthand, topStr, rightStr, bottomStr, leftStr) {
+		let t = 0, r = 0, b = 0, l = 0;
+		if (shorthand) {
+			const tokens = shorthand.split(/[\s,]+/).filter(Boolean);
+			const vals = [];
+			for (let i = 0; i < tokens.length; i++) {
+				const num = parseFloat(tokens[i]);
+				if (!isNaN(num)) vals.push(Math.max(0, num));
+			}
+			if (vals.length === 1) {
+				t = r = b = l = vals[0];
+			} else if (vals.length === 2) {
+				t = b = vals[0];
+				r = l = vals[1];
+			} else if (vals.length === 3) {
+				t = vals[0];
+				r = l = vals[1];
+				b = vals[2];
+			} else if (vals.length >= 4) {
+				t = vals[0];
+				r = vals[1];
+				b = vals[2];
+				l = vals[3];
+			}
+		}
+
+		const override = (valStr, current) => {
+			if (!valStr) return current;
+			const num = parseFloat(valStr);
+			return (!isNaN(num) && num >= 0) ? num : current;
+		};
+
+		return {
+			top: override(topStr, t),
+			right: override(rightStr, r),
+			bottom: override(bottomStr, b),
+			left: override(leftStr, l)
+		};
+	}
+
 	function readParams(el) {
 		const N = svc('names'), cs = getComputedStyle(el);
 		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
 		const c = svc('contrast').parseContrast(get('contrast'));
-		const f = parseFloat(get('feather'));
+		const feather = parseFeather(
+			get('feather'),
+			get('feather-top'),
+			get('feather-right'),
+			get('feather-bottom'),
+			get('feather-left')
+		);
 		return {
 			ok: c.ok,
 			reason: c.reason || '',
 			ratio: c.ratio || 4.5,
 			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
-			feather: f > 0 ? f : 0,
+			feather,
 			color: cs.color
 		};
 	}

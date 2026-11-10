@@ -75,7 +75,6 @@
 		const est = document.createElement('canvas');
 		est.width = w; est.height = h;
 		const ec = est.getContext('2d');
-		ec.setTransform(s, 0, 0, s, -R.left * s, -R.top * s); // draw in client coordinates
 
 		// Page background: body, else html, else assume white.
 		let base = [255, 255, 255, 1], baseReal = false;
@@ -83,9 +82,12 @@
 			const c = Color.parseCssColor(getComputedStyle(n).backgroundColor);
 			if (c && c[3] > 0) { base = c; baseReal = true; break; }
 		}
-		ec.fillStyle = '#fff'; ec.fillRect(R.left, R.top, R.width, R.height);
+		// Fill the WHOLE canvas, in canvas pixels. The canvas is ceil(size * s) pixels, so filling the
+		// element rectangle would leave the last row and column partly transparent (a light line at the edge).
+		ec.fillStyle = '#fff'; ec.fillRect(0, 0, w, h);
 		ec.fillStyle = 'rgba(' + base[0] + ',' + base[1] + ',' + base[2] + ',' + base[3] + ')';
-		ec.fillRect(R.left, R.top, R.width, R.height);
+		ec.fillRect(0, 0, w, h);
+		ec.setTransform(s, 0, 0, s, -R.left * s, -R.top * s); // from here on, draw in client coordinates
 
 		const nx = Math.ceil(R.width / g), ny = Math.ceil(R.height / g);
 		const V = new Uint8Array(nx * ny), cache = new Map(), why = new Set(), taint = new Set();
@@ -94,9 +96,16 @@
 			for (let j = 0; j < ny; j++) {
 				let runSig = null, runStart = 0, runStack = null;
 				// Neighbouring cells with the same layer stack are painted as one rectangle.
+				// The rectangle edges are snapped to whole canvas pixels: a clip on a fractional edge is
+				// antialiased, and two such clips side by side leave a seam that lets the base colour show
+				// through (visible as light horizontal lines over a big photo). The last row and column
+				// extend to the canvas edge.
 				const flush = (iEnd) => {
 					if (runSig === null) return;
-					const C = { x: R.left + runStart * g, y: R.top + j * g, w: Math.min((iEnd - runStart) * g, R.width - runStart * g), h: Math.min(g, R.height - j * g) };
+					const x0 = Math.round(runStart * g * s), x1 = iEnd >= nx ? w : Math.round(iEnd * g * s);
+					const y0 = Math.round(j * g * s), y1 = j + 1 >= ny ? h : Math.round((j + 1) * g * s);
+					if (x1 <= x0 || y1 <= y0) return;
+					const C = { x: R.left + x0 / s, y: R.top + y0 / s, w: (x1 - x0) / s, h: (y1 - y0) / s };
 					for (let k = runStack.length - 1; k >= 0; k--) paintLayer(ec, runStack[k], C);
 				};
 				for (let i = 0; i < nx; i++) {

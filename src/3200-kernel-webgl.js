@@ -138,7 +138,11 @@
 		gl.uniform2f(L.uSize, w, h);
 		gl.uniform2f(L.uDim, W, H);
 		gl.uniform1f(L.uScale, s);
-		gl.uniform1f(L.uFeather, params.feather);
+		const fParam = params.feather;
+		const f = (typeof fParam === 'number')
+			? { top: fParam, right: fParam, bottom: fParam, left: fParam }
+			: (fParam || { top: 0, right: 0, bottom: 0, left: 0 });
+		gl.uniform4f(L.uFeather, f.top || 0, f.right || 0, f.bottom || 0, f.left || 0);
 		gl.uniform3f(L.uGridInfo, grid.nx, grid.ny, grid.g);
 		gl.uniform1f(L.uHasEst, hasEst);
 		gl.uniform1f(L.uTri, tri ? 1 : 0);

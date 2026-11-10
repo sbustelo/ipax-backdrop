@@ -73,6 +73,9 @@
 		compositor.place(rec);
 		const R = rec.layer.getBoundingClientRect();
 		if (R.width < 4 || R.height < 4) return; // hidden or collapsed
+		// elementsFromPoint only answers inside the viewport: skip what is entirely outside it. The scroll
+		// listener recomputes the element when it comes into view.
+		if (R.bottom < 0 || R.top > window.innerHeight || R.right < 0 || R.left > window.innerWidth) return;
 
 		const params = svc('reader').readParams(el);
 		if (!params.ok) { compositor.clear(rec); warnOnce(el, params.reason); return; }
@@ -103,6 +106,7 @@
 		attachAll();
 		offs = [bus().on('ipax-backdrop:invalidate', schedule), bus().on('ipax-backdrop:image-loaded', schedule)];
 		window.addEventListener('resize', schedule);
+		window.addEventListener('scroll', schedule, { passive: true });
 		if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedule);
 		emit('ready', {});
 		schedule();
@@ -114,6 +118,7 @@
 		offs.forEach((off) => off());
 		offs = [];
 		window.removeEventListener('resize', schedule);
+		window.removeEventListener('scroll', schedule);
 		svc('compositor').detachAll();
 		records = [];
 	}

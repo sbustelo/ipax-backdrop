@@ -127,3 +127,7 @@ Rule: **if you change one implementation, change the other and compare them.** M
 - Up to 7 differently coloured text runs per element.
 - Colours leaving the sRGB gamut after the lightness change are clipped, which can shift hue slightly.
 - Stacked managed elements are processed lowest first by `z-index` and DOM order; exotic stacking contexts can break that order.
+
+---
+
+_IPAX Backdrop v0.1.02 • 2026-11-10 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

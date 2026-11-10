@@ -70,14 +70,61 @@
 	root.addEventListener('input', (e) => {
 		const c = e.target.closest('[data-ctl]');
 		if (!c) return;
+
+		// Bidirectional synchronization between range and number inputs inside the same row
+		const row = c.closest('.ex-row');
+		if (row) {
+			const partner = row.querySelector(c.type === 'range' ? 'input[type="number"]' : 'input[type="range"]');
+			if (partner && partner !== c) partner.value = c.value;
+		}
+
 		const k = c.dataset.ctl;
-		const prop = { mode: ['--ipax-backdrop-mode', c.value], contrast: ['--ipax-backdrop-contrast', c.value], feather: ['--ipax-backdrop-feather', c.value + 'px'] }[k];
-		if (prop) stage.querySelectorAll('.ex-glass').forEach((g) => g.style.setProperty(prop[0], prop[1]));
-		if (k === 'blur') stage.style.setProperty('--ex-blur', c.value + 'px');
-		if (k === 'backend') ipax.config.backend = c.value;
-		if (k === 'overlay') stage.classList.toggle('ex-s-overlay', c.checked);
-		if (k === 'grad') stage.classList.toggle('ex-s-grad', c.checked);
-		if (k === 'raw') stage.classList.toggle('ex-raw', c.checked);
+
+		if (k === 'mode') {
+			stage.querySelectorAll('.ex-glass').forEach((g) => g.style.setProperty('--ipax-backdrop-mode', c.value));
+		} else if (k === 'contrast') {
+			stage.querySelectorAll('.ex-glass').forEach((g) => g.style.setProperty('--ipax-backdrop-contrast', c.value));
+		} else if (k === 'feather') {
+			// Master feather: set shorthand and clear directional overrides
+			stage.querySelectorAll('.ex-glass').forEach((g) => {
+				['top', 'right', 'bottom', 'left'].forEach((s) => g.style.removeProperty('--ipax-backdrop-feather-' + s));
+				g.style.setProperty('--ipax-backdrop-feather', c.value + 'px');
+			});
+			['top', 'right', 'bottom', 'left'].forEach((side) => {
+				root.querySelectorAll('[data-ctl="feather-' + side + '"]').forEach((input) => {
+					input.value = c.value;
+				});
+			});
+		} else if (k.indexOf('feather-') === 0) {
+			const side = k.replace('feather-', '');
+			stage.querySelectorAll('.ex-glass').forEach((g) => g.style.setProperty('--ipax-backdrop-feather-' + side, c.value + 'px'));
+
+			// If all 4 directional inputs match, reconcile back to shorthand
+			const sides = ['top', 'right', 'bottom', 'left'];
+			const vals = sides.map((s) => {
+				const el = root.querySelector('input[data-ctl="feather-' + s + '"]');
+				return el ? el.value : null;
+			});
+			const allEqual = vals.every((v) => v !== null && v === vals[0]);
+			if (allEqual) {
+				root.querySelectorAll('[data-ctl="feather"]').forEach((el) => { el.value = vals[0]; });
+				stage.querySelectorAll('.ex-glass').forEach((g) => {
+					sides.forEach((s) => g.style.removeProperty('--ipax-backdrop-feather-' + s));
+					g.style.setProperty('--ipax-backdrop-feather', vals[0] + 'px');
+				});
+			}
+		} else if (k === 'blur') {
+			stage.style.setProperty('--ex-blur', c.value + 'px');
+		} else if (k === 'backend') {
+			ipax.config.backend = c.value;
+		} else if (k === 'overlay') {
+			stage.classList.toggle('ex-s-overlay', c.checked);
+		} else if (k === 'grad') {
+			stage.classList.toggle('ex-s-grad', c.checked);
+		} else if (k === 'raw') {
+			stage.classList.toggle('ex-raw', c.checked);
+		}
+
 		ipax.refresh();
 	});
 
@@ -122,6 +169,6 @@
 	/* ---------- Initial photos ---------- */
 	// setBg(hero, paintImage(7, 800, 300, ['#2f5d8a', '#8a8f55', '#d9a35b']));
 	setBg(stage.querySelector('[data-img="a"]'), paintImage(21, 420, 380, ['#a23b5a', '#e8c26b', '#2c6e6a']));
-	setBg(stage.querySelector('[data-img="b"]'), paintImage(55, 380, 340, ['#2b3a67', '#7aa36b', '#d9d2c5']));
+	//setBg(stage.querySelector('[data-img="b"]'), paintImage(55, 380, 340, ['#2b3a67', '#7aa36b', '#d9d2c5']));
 	setBg(stage, paintImage(99, 700, 600, ['#3b3f6b', '#c98b5a', '#6fa8a0']));
 })();

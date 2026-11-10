@@ -32,7 +32,12 @@
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
-	/** Fraction of unknown cells around (rx, ry), bilinear between cell centres. */
+
+
+
+
+
+
 	function veilFrac(grid, rx, ry) {
 		const V = grid.V, nx = grid.nx, ny = grid.ny, g = grid.g;
 		const gv = (i, j) => V[Math.min(ny - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
@@ -49,7 +54,14 @@
 		if (est) { try { pix = est.getContext('2d').getImageData(0, 0, w, h).data; } catch (e) { tainted = true; } }
 
 		const out = new Uint8ClampedArray(w * h * 4);
-		const tri = params.mode === 'tricontrast', ratio = params.ratio, f = params.feather, rS = K.solveRatio(ratio);
+		const tri = params.mode === 'tricontrast', ratio = params.ratio, rS = K.solveRatio(ratio);
+		const fParam = params.feather;
+		const f = (typeof fParam === 'number')
+			? { top: fParam, right: fParam, bottom: fParam, left: fParam }
+			: (fParam || { top: 0, right: 0, bottom: 0, left: 0 });
+		const fT = f.top > 0 ? f.top : 0, fR = f.right > 0 ? f.right : 0, fB = f.bottom > 0 ? f.bottom : 0, fL = f.left > 0 ? f.left : 0;
+		const hasFeather = fT > 0 || fR > 0 || fB > 0 || fL > 0;
+
 		const runs = colors.runs.slice(0, svc('limits').maxRuns);
 		const pcs = [K.prepareColor(colors.base, rS)].concat(runs.map((r) => K.prepareColor(r.c, rS)));
 		const band = K.band(ratio), tv = K.bandVeil(band);
@@ -84,9 +96,19 @@
 
 		let minV = Infinity, under = 0, nI = 0, nV = 0;
 		for (let y = 0; y < h; y++) {
+			const ry = (y + 0.5) / s;
+			const mY = hasFeather ? Math.min(
+				fT > 0 ? clamp01(ry / fT) : 1,
+				fB > 0 ? clamp01((H - ry) / fB) : 1
+			) : 1;
+
 			for (let x = 0; x < w; x++) {
-				const q = (y * w + x) * 4, rx = (x + 0.5) / s, ry = (y + 0.5) / s;
-				const M = smooth(f > 0 ? clamp01(Math.min(rx, W - rx, ry, H - ry) / f) : 1);
+				const q = (y * w + x) * 4, rx = (x + 0.5) / s;
+				const M = hasFeather ? smooth(Math.min(
+					mY,
+					fL > 0 ? clamp01(rx / fL) : 1,
+					fR > 0 ? clamp01((W - rx) / fR) : 1
+				)) : 1;
 				const known = pix ? 1 - veilFrac(grid, rx, ry) : 0;
 
 				let wk = 0, kk = -1;

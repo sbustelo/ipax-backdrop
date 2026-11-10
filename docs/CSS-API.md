@@ -15,11 +15,36 @@ ipax-backdrop is configured with CSS custom properties. The library reads them w
 
 | Property | Values | Default | Meaning |
 |---|---|---|---|
-| `--ipax-backdrop-contrast` | number, `1` to `15` | `4.5` | Minimum WCAG 2.x contrast ratio between the text and the corrected backdrop. |
-| `--ipax-backdrop-feather` | length in `px` | `0` | Soft edge of the effect, from the element border **inward**. Contrast is only guaranteed where the effect is fully applied, so keep the element padding at least as large as the feather. |
+| `--ipax-backdrop-contrast` | number, `1` to `15` | `4.5` | Minimum WCAG 2.x contrast ratio between the text and the corrected backdrop. Set to `1` to bypass lightness adaptation. |
+| `--ipax-backdrop-feather` | 1 to 4 lengths (`px` or unitless) | `0` | Soft edge shorthand following CSS TRBL convention (top, right, bottom, left). Contrast is guaranteed only where fully applied; keep element padding larger than feather. |
+| `--ipax-backdrop-feather-top` | length (`px` or unitless) | inherited | Directional override for top edge feathering. Overrules shorthand. |
+| `--ipax-backdrop-feather-right` | length (`px` or unitless) | inherited | Directional override for right edge feathering. Overrules shorthand. |
+| `--ipax-backdrop-feather-bottom` | length (`px` or unitless) | inherited | Directional override for bottom edge feathering. Overrules shorthand. |
+| `--ipax-backdrop-feather-left` | length (`px` or unitless) | inherited | Directional override for left edge feathering. Overrules shorthand. |
 | `--ipax-backdrop-mode` | `default`, `tricontrast` | `default` | See below. |
 
-Values above `15`, or any value with an `lc` unit, are read as APCA Lc. **APCA is not supported in this version**: the element is left untouched and a `warning` event is emitted.
+### Feather Shorthand & Longhands
+
+`--ipax-backdrop-feather` accepts 1, 2, 3, or 4 values, space- or comma-separated, adhering to the standard CSS box model:
+
+```css
+/* 1 value:  all four edges */
+--ipax-backdrop-feather: 14px;
+
+/* 2 values: top/bottom | right/left */
+--ipax-backdrop-feather: 10px 20px;
+
+/* 3 values: top | right/left | bottom */
+--ipax-backdrop-feather: 10px 20px 30px;
+
+/* 4 values: top | right | bottom | left */
+--ipax-backdrop-feather: 10px 20px 30px 40px;
+
+/* Shorthand + Longhand directional override */
+--ipax-backdrop-feather: 14px;
+--ipax-backdrop-feather-right: 0; /* clean cut on the right, soft on all other edges */
+
+
 
 ### Modes
 
@@ -89,3 +114,7 @@ Listen with `window.j0.bus.on('ipax-backdrop:<name>', handler)`.
 - WCAG 2.x contrast only. APCA is deliberately out of this version.
 - Colours that leave the sRGB gamut after the lightness change are clipped, which can shift their hue slightly.
 - Output is 8 bits per channel; the solver keeps a small safety margin so rounding never drops a pixel under the requested ratio.
+
+---
+
+_IPAX Backdrop v0.1.02 • 2026-11-10 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

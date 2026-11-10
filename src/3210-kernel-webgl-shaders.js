@@ -19,6 +19,13 @@
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
 
+
+
+
+
+
+
+
 	const vertex = [
 		'attribute vec2 aPos;',
 		'void main() { gl_Position = vec4(aPos, 0.0, 1.0); }'
@@ -34,7 +41,7 @@ uniform sampler2D uGrid;    // unknown cells (LUMINANCE, 1.0 = unknown)
 uniform vec2  uSize;        // working size in px
 uniform vec2  uDim;         // element size in CSS px
 uniform float uScale;       // working px per CSS px
-uniform float uFeather;     // CSS px
+uniform vec4  uFeather;     // CSS px: top, right, bottom, left
 uniform vec3  uGridInfo;    // nx, ny, cell size (CSS px)
 uniform float uHasEst;      // 0.0 when the estimate could not be uploaded
 uniform float uTri;         // 1.0 = tricontrast
@@ -127,11 +134,19 @@ void main() {
   float ry = px.y / uScale;
 
   float M = 1.0;
-  if (uFeather > 0.0) M = clamp(min(min(rx, uDim.x - rx), min(ry, uDim.y - ry)) / uFeather, 0.0, 1.0);
-  M = sm(M);
+  float mT = uFeather.x > 0.0 ? clamp(ry / uFeather.x, 0.0, 1.0) : 1.0;
+  float mR = uFeather.y > 0.0 ? clamp((uDim.x - rx) / uFeather.y, 0.0, 1.0) : 1.0;
+  float mB = uFeather.z > 0.0 ? clamp((uDim.y - ry) / uFeather.z, 0.0, 1.0) : 1.0;
+  float mL = uFeather.w > 0.0 ? clamp(rx / uFeather.w, 0.0, 1.0) : 1.0;
+  M = sm(min(min(mT, mR), min(mB, mL)));
 
   float known = 0.0;
   if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry);
+
+
+
+
+
 
   float wk = 0.0;
   int kk = -1;

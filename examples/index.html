@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<title>ipax-backdrop: Lucid Glass example</title>
+	<link rel="stylesheet" href="css/index-example.css">
+</head>
+
+<body>
+	<main class="ex-page" data-ref="root">
+
+		<!--
+			The effect is declared in example.css (--ipax-backdrop-* properties).
+			
+			The data-ipax-backdrop attribute is an optional marker: it lets the library
+			find the element even when the stylesheet cannot be read (cross-origin, or
+			a linked file opened from file://).
+		-->
+
+		<header class="ex-hero" data-ref="hero">
+			<h1 class="example-title" data-label="Title" data-ipax-backdrop >
+				Lucid Glass
+			</h1>
+			<div class="example-hero-block" data-ipax-backdrop >
+				<p>
+					A vanilla JavaScript &amp; WebGL backdrop-filter to get
+					<strong>legible text over any photo</strong>.
+				</p>
+			</div>
+		</header>
+
+
+		<h2>IPAX-backdrop</h2>
+
+		<p>A <code>backdrop-filter</code> whose backdrop is corrected to guarantee WCAG 2
+			contrast, using WebGL or CPU to adjusts the lightness (L&nbsp;in OKLab) of
+			the photo underneath the text, pixel by pixel, only as far as the
+			requested contrast needs.</p>
+		<p></p>
+
+		<p>Where it cannot know what is underneath, it
+		lays a translucent veil computed for the worst case.</p>
+
+		<p>The text boxes above are plain <code>HTML</code> elements with 
+			<code>--ipax-backdrop-*</code> properties declared in CSS.
+			The <code>H1</code> additionally applies standard <code>text-shadow</code>;
+			<code>DIV.example-hero-block</code> applies <code>backdrop-filter:blur</code>.
+		</p>
+		
+		
+
+		<h2>Experiment</h2>
+
+		<p >Drag any box and resize it from its bottom-right
+			corner. The two boxes with large text use the effect. The others are
+			test backdrops: two photos, a flat colour with alpha, a gradient and a
+			rotated box. The library cannot reproduce the last three and flags them
+			as unknown.</p>
+		<div class="ex-stage" data-ref="stage">
+			<div class="ex-box ex-photo" data-box data-noraise data-x="6" data-y="6" data-w="210" data-h="190"
+				data-z="1" data-img="a"><span class="ex-grip" data-grip></span></div>
+			<div class="ex-box ex-photo" data-box data-x="130" data-y="110" data-w="190" data-h="170" data-z="2"
+				data-img="b"><span class="ex-grip" data-grip></span></div>
+
+			<div class="ex-box ex-flat" data-box data-x="10" data-y="230" data-w="120" data-h="80" data-z="3">
+				<div class="ex-t">Flat colour</div><span class="ex-grip" data-grip></span>
+			</div>
+			<div class="ex-box ex-grad" data-box data-x="200" data-y="300" data-w="125" data-h="100" data-z="4">
+				<div class="ex-t">Gradient</div><span class="ex-grip" data-grip></span>
+			</div>
+			<div class="ex-box ex-rot" data-box data-x="40" data-y="330" data-w="100" data-h="70" data-z="5">
+				<div class="ex-t">Rotated</div><span class="ex-grip" data-grip></span>
+			</div>
+			<div class="ex-box" data-box data-label="Box A" data-x="30" data-y="60" data-w="200" data-h="100"
+				data-z="6">
+				<div class="ex-glass" data-ipax-backdrop><span>White</span>&nbsp;<span class="ex-k">and
+						black</span>&nbsp;together</div><span class="ex-grip" data-grip></span>
+			</div>
+			<div class="ex-box" data-box data-label="Box B" data-x="100" data-y="230" data-w="210" data-h="90"
+				data-z="7">
+				<div class="ex-glass ex-yellow" data-ipax-backdrop>Coloured text on a
+					photo</div><span class="ex-grip" data-grip></span>
+			</div>
+		</div>
+		<p class="ex-report" data-ref="report"></p>
+		<p class="ex-report" data-ref="status"></p>
+
+		<label class="ex-row"><span>Mode <sup>1<sup></span>
+			<select data-ctl="mode">
+				<option value="default">default</option>
+				<option value="tricontrast">tricontrast</option>
+			</select>
+		</label>
+			
+		<label class="ex-row">
+			<span>Contrast (WCAG ratio) <sup>2</sup></span>
+			<input type="range" data-ctl="contrast" min="1.5" max="15" step="0.5"
+			value="4.5" />
+		</label>
+			
+		<label class="ex-row">
+			<span>Feather (px)</span>
+			<input type="range" data-ctl="feather" min="0" max="40" step="1" value="14" />
+		</label>
+			
+		<label class="ex-row">
+			<span>Element blur, CSS (px) <sup>3<sup></span>
+			<input type="range" data-ctl="blur" min="0" max="16" step="1" value="4" />
+		</label>
+				
+		<label class="ex-row">
+			<span>Backend</span>
+			<select data-ctl="backend">
+				<option value="auto">auto</option>
+				<option value="webgl">webgl</option>
+				<option value="cpu">cpu</option>
+			</select>
+		</label>
+	
+		<label class="ex-row">
+			<span>Author overlay (plain CSS)</span>
+			<input type="checkbox" data-ctl="overlay" />
+		</label>
+		
+		<label class="ex-row"><span>Author gradient (plain CSS)</span><input type="checkbox" data-ctl="grad"></label>
+		
+		<label class="ex-row"><span>Show
+				without effect</span><input type="checkbox" data-ctl="raw"></label><label class="ex-row"><span>Load
+				photo
+				into</span><select data-ref="imgTarget">
+				<option value="a">Photo 1</option>
+				<option value="b">Photo 2</option>
+				<option value="hero">Header</option>
+				<option value="stage">Stage background</option>
+			</select></label>
+		
+		<label class="ex-row"><span>Image file</span><input type="file" data-ref="file"
+				accept="image/*"></label>
+
+				<br>
+
+		<p class="ex-small">
+			1. <strong>Tricontrast</strong> keeps the backdrop inside the band where white and black text both reach the ratio. 
+		<a href="https://medium.com/santiago-bustelo-in-english/tricontrast-the-swiss-school-with-wcag-accessibility-a5da3d9ae9fd#:~:text=monochromatic%20Tricontrast%20space" target="_blank">It only exists up to 4.5:1</a>, where monochromatic options narrow just to <code>#757575</code> and <code>#767676</code>, flattening the picture's luminosity into a near-uniform field.
+		</p>
+
+		<p class="ex-small">
+		2. <strong>APCA contrast is not offered</strong>, as the GPU shader cannot depend on (or faithfully reproduce) the licensed reference implementation.
+		</p>
+
+		
+
+		<p class="ex-small">
+			3. <strong>WCAG is defined for text over a plain colour;</strong> it says nothing about how the formula should be adjusted for text over a photograph. In my experiments, image detail "fights" the legibility of the text: without blur, it's better to raise the contrast to the next tier (from 3 to 4.5, and from 4.5 to 7). A blurred backdrop moves the image closer to the flat-field case the model measures, so the reported ratio becomes a more meaningful predictor of legibility.
+		</p>
+
+
+	</main>
+
+	<!-- 1. j0 kernel (bus and registry) -->
+	<script src="../lib/j0-kernel/01-bus-j0kernel.js"></script>
+	<script src="../lib/j0-kernel/02-core-j0kernel.js"></script>
+	<!-- 2. ipax-backdrop, by ascending numeric prefix -->
+	<script src="../src/0010-nucleo.js"></script>
+	<script src="../src/0100-util-color.js"></script>
+	<script src="../src/0110-util-contrast.js"></script>
+	<script src="../src/0200-orquestador.js"></script>
+	<script src="../src/1000-lector.js"></script>
+	<script src="../src/1100-lector-texto.js"></script>
+	<script src="../src/2000-resolutor.js"></script>
+	<script src="../src/2100-resolutor-capas.js"></script>
+	<script src="../src/2200-resolutor-geometria.js"></script>
+	<script src="../src/3000-kernel.js"></script>
+	<script src="../src/3100-kernel-cpu.js"></script>
+	<script src="../src/3200-kernel-webgl.js"></script>
+	<script src="../src/3210-kernel-webgl-shaders.js"></script>
+	<script src="../src/4000-compositor.js"></script>
+	<script src="../src/9000-api.js"></script>
+	<!-- 3. the example page -->
+	<script src="js/index-example.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,249 @@
+
+/* ipax-backdrop example page. Layout and test fixtures only: the effect itself
+   is the three --ipax-backdrop-* declarations marked below. */
+
+:root {
+	--ex-bg: #f0f0f0;
+	--ex-fg: #15171c;
+	--ex-mut: #566070;
+	--ex-line: #d3d7df;
+	--ex-acc: #1f4fd1;
+	--ex-blur: 4px;
+	box-sizing: border-box;
+	padding-top: env(safe-area-inset-top, 0px);
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+
+/* ===== THE EFFECT: three declarations, nothing else ===== */
+.example-title, .example-hero-block{
+	--ipax-backdrop-contrast: 3; /* WCAG ratio, up to 15 */
+	--ipax-backdrop-mode: default; /* default | tricontrast */
+}
+.example-hero-block{
+	--ipax-backdrop-contrast: 4.5;
+}
+
+.ex-glass {
+	--ipax-backdrop-contrast: 4.5; /* WCAG ratio, up to 15 */
+	--ipax-backdrop-feather: 14; /* soft edge, from the element border inward */
+	--ipax-backdrop-mode: default; /* default | tricontrast */
+
+}
+
+
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--ex-bg: #121418;
+		--ex-fg: #e9ebf0;
+		--ex-mut: #9aa3b2;
+		--ex-line: #2a2f38;
+		--ex-acc: #86a8ff;
+	}
+}
+:root[data-theme="dark"] {
+	--ex-bg: #121418;
+	--ex-fg: #e9ebf0;
+	--ex-mut: #9aa3b2;
+	--ex-line: #2a2f38;
+	--ex-acc: #86a8ff;
+}
+
+html {
+	scroll-padding-top: env(safe-area-inset-top, 0px);
+}
+body {
+	margin: 0;
+	background: var(--ex-bg);
+	color: var(--ex-fg);
+	font:
+		12pt/1.5 system-ui,
+		-apple-system,
+		"Segoe UI",
+		sans-serif;
+}
+.ex-page {
+	max-width: 60em;
+	margin: 0 auto;
+	padding: 0 12px 32px;
+}
+
+.ex-page p {
+	margin: 8px 0;
+}
+.ex-page H2{
+	font-size:24pt;
+	margin:24pt 0 4pt;
+}
+.ex-small {
+	font-size: 12pt;
+	color: var(--ex-mut);
+}
+
+
+
+/* ===== Hero ===== */
+.ex-hero {
+	position: relative;
+	height:80vh;
+	min-height: 720px;
+	margin: 0 -12px;
+	
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+
+	background-color: var(--ex-line);
+	background-size: cover;
+	background-position: center;
+	overflow: hidden;
+	background-image: url("../img/ipax-couple-2026-11.jpg");
+}
+
+H1.example-title {
+	margin: 0;
+	padding: 16px 32px;
+	font-size: 64pt;
+	line-height: 1.1;
+	color: #fff;
+	font-weight: normal;
+	
+	text-shadow: 0px 2px var(--ex-blur) black;
+	
+}
+
+.example-hero-block{
+	padding:32px;
+	backdrop-filter: blur(var(--ex-blur));
+	-webkit-backdrop-filter: blur(var(--ex-blur));
+}
+
+.example-hero-block{
+	font-size:18pt;
+	color:#fff;
+}
+
+
+.example-hero-block P STRONG{
+	color: lime;
+}
+
+
+
+/* ===== Stage and draggable boxes ===== */
+.ex-stage {
+	position: relative;
+	height: 440px;
+	overflow: hidden;
+	border-radius: 6px;
+	background-color: var(--ex-line);
+	background-size: cover;
+	background-position: center;
+}
+.ex-box {
+	position: absolute;
+	box-sizing: border-box;
+	border: 1px solid rgba(255, 255, 255, 0.75);
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	cursor: move;
+}
+.ex-photo {
+	background-size: cover;
+	background-position: center;
+	background-color: var(--ex-line);
+}
+.ex-flat {
+	background: rgba(40, 90, 160, 0.55);
+	color: #fff;
+}
+.ex-grad {
+	background-image: linear-gradient(135deg, #f6d365, #fda085);
+	color: #222;
+}
+.ex-rot {
+	transform: rotate(8deg);
+	background: #e07a2d;
+	color: #fff;
+}
+.ex-t {
+	padding: 6px;
+	font-weight: 700;
+	font-size: 14pt;
+}
+.ex-glass {
+	position: absolute;
+	inset: 0;
+	box-sizing: border-box;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	text-align: center;
+	padding: 8px;
+	font-weight: 700;
+	font-size: 14pt;
+	line-height: 1.15;
+	color: #fff;
+	backdrop-filter: blur(var(--ex-blur));
+	-webkit-backdrop-filter: blur(var(--ex-blur));
+}
+.ex-yellow {
+	color: #ffd54a;
+}
+.ex-k {
+	color: #000;
+}
+.ex-s-overlay .ex-glass {
+	background-color: rgba(0, 0, 0, 0.2);
+}
+.ex-s-grad .ex-glass {
+	background-image: linear-gradient(
+		to bottom,
+		rgba(0, 0, 0, 0),
+		rgba(0, 0, 0, 0.35)
+	);
+}
+.ex-raw ipax-backdrop-layer {
+	display: none;
+}
+.ex-grip {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 24px;
+	height: 24px;
+	cursor: nwse-resize;
+	background: linear-gradient(
+		135deg,
+		transparent 55%,
+		rgba(255, 255, 255, 0.85) 55%
+	);
+}
+
+/* ===== Report and controls ===== */
+.ex-report {
+	margin: 10px 0;
+	padding: 8px 10px;
+	border: 1px solid var(--ex-line);
+	border-radius: 6px;
+	font-size: 10pt;
+	color: var(--ex-mut);
+	white-space: pre-line;
+}
+.ex-row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 8px;
+	align-items: center;
+	padding: 6px 0;
+	border-bottom: 1px solid var(--ex-line);
+}
+.ex-row input[type="range"] {
+	width: 130px;
+	accent-color: var(--ex-acc);
+}
+.ex-row select {
+	font: inherit;
+}

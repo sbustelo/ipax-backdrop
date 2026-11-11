@@ -18,13 +18,13 @@ $defaultConfig = [
     'echo'        => true,
     'sources'     => ['lib', 'src'],
     'minify'      => [
-        'enabled' => false,
+        'enabled' => true,
         'api_url' => 'https://www.toptal.com/developers/javascript-minifier/api/raw',
         'timeout' => 10
     ]
 ];
 
-$customConfigFile = __DIR__ . '/_build-config.php';
+$customConfigFile = __DIR__ . '/config/_build-config.php';
 $config = $defaultConfig;
 
 if (file_exists($customConfigFile)) {
@@ -198,7 +198,7 @@ if (empty($filesToBundle)) {
 }
 
 // 8. RAM concatenation with defensive syntax isolation
-$buffer = "/**\n * IPAX BACKDROP BUNDLE\n * Compiled: " . date('Y-m-d H:i:s') . "\n */\n\n";
+$buffer = "/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: " . date('Y-m-d') . " */\n\n";
 
 foreach ($filesToBundle as $filePath) {
     $relPath = str_replace('\\', '/', substr($filePath, strlen($rootDir) + 1));
@@ -206,6 +206,39 @@ foreach ($filesToBundle as $filePath) {
     $buffer .= "/* --- {$relPath} --- */\n";
     $buffer .= rtrim((string)$content) . "\n;\n\n";
 }
+
+// 8.5. In-flight GLSL Minification
+$buffer = preg_replace_callback('/\/\* glsl-minifier-start \*\/(.*?)\/\* glsl-minifier-end \*\//s', function($matches) {
+    $block = $matches[1];
+    
+    // Buscar el contenido exacto dentro de los backticks (`)
+    if (preg_match('/`([^`]*)`/', $block, $btMatches)) {
+        $glsl = $btMatches[1];
+        
+        // 1. Eliminar comentarios de una línea (//)
+        $glsl = preg_replace('!//.*!', '', $glsl);
+        
+        // 2. Procesar línea por línea para cuidar las directivas de preprocesador
+        $lines = explode("\n", $glsl);
+        $minified = '';
+        foreach ($lines as $line) {
+            $line = trim(preg_replace('/\s+/', ' ', $line)); // colapsar múltiples espacios
+            if ($line === '') continue;
+            
+            // Las macros de WebGL (#define, #ifdef) REQUIEREN un salto de línea al final
+            if ($line[0] === '#') {
+                $minified .= $line . "\n";
+            } else {
+                $minified .= $line . " ";
+            }
+        }
+        
+        $minified = trim($minified);
+        // Devolver el bloque entero reconstruido
+        return str_replace($btMatches[0], "`" . $minified . "`", $matches[0]);
+    }
+    return $matches[0]; // Fallback de seguridad si no hay backticks
+}, $buffer);
 
 // 9. Destination directory validation
 $targetRelPath = ltrim(str_replace('\\', '/', $config['output_file']), '/');
@@ -250,19 +283,28 @@ if (!empty($config['minify']['enabled'])) {
     $minRelPath = ipax_resolve_minified_path($targetRelPath);
     $minAbsPath = $rootDir . '/' . $minRelPath;
 
-    $minifiedContent = ipax_minify_js($buffer, (array)$config['minify']);
+    
+		$minifiedContent = ipax_minify_js($buffer, (array)$config['minify']);
 
-    if ($minifiedContent === null) {
-        if ($config['echo']) {
-            echo "Warning: Minification API request failed or timed out. '{$minRelPath}' was not generated.\n";
-        }
-    } else {
-        if (!ipax_rotate_backup($minAbsPath)) {
+        if ($minifiedContent === null) {
             if ($config['echo']) {
-                echo "Critical error: Could not rotate backup for: {$minAbsPath}\n";
+                echo "Warning: Minification API request failed or timed out. '{$minRelPath}' was not generated.\n";
             }
-            exit(1);
-        }
+        } else {
+            // Inyección blindada: si el minificador remoto barrió el comentario protegido, lo restituimos a la fuerza.
+            $banner = "/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: " . date('Y-m-d') . " */\n";
+            if (strpos($minifiedContent, '/*! IPAX Backdrop') === false) {
+                $minifiedContent = $banner . $minifiedContent;
+            }
+
+            if (!ipax_rotate_backup($minAbsPath)) {
+                if ($config['echo']) {
+                    echo "Critical error: Could not rotate backup for: {$minAbsPath}\n";
+                }
+                exit(1);
+            }
+
+
 
         $minWriteResult = file_put_contents($minAbsPath, $minifiedContent, LOCK_EX);
         if ($minWriteResult === false) {

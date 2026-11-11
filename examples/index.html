@@ -20,69 +20,85 @@
 		-->
 
 		<header class="ex-hero" data-ref="hero">
+			<div class="ex-hero-header">
+				<label class="ex-toggle-wrap">
+					<span>Show effect</span>
+					<input type="checkbox" class="ex-switch" data-ctl="effect-hero" checked />
+				</label>
+			</div>
+			
 			<h1 class="example-title" data-label="Title" data-ipax-backdrop >
 				Lucid Glass
 			</h1>
 			<div class="example-hero-block" data-ipax-backdrop >
 				<p>
 					A vanilla JavaScript &amp; WebGL backdrop-filter to get
-					<strong>legible text over any picture</strong>.
+					<strong>legible text over any picture,</strong> without 
+					<strong style="color: cyan;">flat overlays or dark gradients.</strong>
 				</p>
 			</div>
 		</header>
 
 
-		<h2>IPAX-backdrop</h2>
+		<h2>IPAX-backdrop <span style="font-weight: normal;">with linear blur</span></h2>
 
-		<p>A <code>backdrop-filter</code> whose backdrop is corrected to guarantee WCAG 2
-			contrast, using WebGL or CPU to adjusts the lightness (L&nbsp;in OKLab) of
-			the picture underneath the text, pixel by pixel, only as far as the
-			requested contrast needs.</p>
-		<p></p>
+		<p class="destacado">Corrects whatever is behind an element to <strong>guarantee WCAG 2 contrast.</strong></p>
+        
+		<p>The engine adjusts the lightness (L&nbsp;in OKLab) of the picture's pixels underneath the text, just as necessary to hit the target ratio. Blur and a feather mask can be applied. Setting the contrast to <code>1</code> turns the engine into a pure linear blur utility.</p>
 
-		<p>Where it cannot know what is underneath, it
-		lays a translucent veil computed for the worst case.</p>
+		<p>The text boxes above are plain <code>HTML</code> elements driven by <code>--ipax-backdrop-*</code> CSS properties.</p>
 
-		<p>The text boxes above are plain <code>HTML</code> elements with 
-			<code>--ipax-backdrop-*</code> properties declared in CSS.
-			The <code>H1</code> additionally applies standard <code>text-shadow</code>;
-			<code>DIV.example-hero-block</code> applies <code>backdrop-filter:blur</code>.
-		</p>
-		
-		
+		<p><a href="https://github.com/sbustelo/ipax-backdrop" target="_blank">Source and documentation on GitHub &raquo;</a></p>
 
 		<h2>Experiment</h2>
 
-		<p >Drag any box and resize it from its bottom-right
-			corner. The two boxes with large text use the effect. The others are
-			test backdrops: two picture, a flat colour with alpha, a gradient and a
-			rotated box. The library cannot reproduce the last three and flags them
-			as unknown.</p>
-		<div class="ex-stage" data-ref="stage">
+		<p class="destacado">Drag any box and resize it from its bottom-right corner. The boxes labeled <strong>"Light and dark"</strong> and <strong>"Custom color"</strong> use the effect; the others are test backdrops.</p>
+            
+		<p>The primary goal is ensuring legible text over photos. To do this <em>without asking for screen-capture permissions</em>, the engine must rebuild the background by extracting only images and solid colors, ignoring other DOM content.</p>
+
+		<p>To keep the solution fast and robust, anything that cannot be safely redrawn (like CSS gradients or transformed elements) gets covered by a translucent veil, applying the flat tone needed to guarantee contrast against the worst possible background.</p>
+
 			
-			<div class="ex-box ex-picture" data-box data-noraise data-x="6" data-y="6" data-w="310" data-h="290"
-				data-z="1" data-img="a"><span class="ex-grip" data-grip></span></div>
-			<div class="ex-box ex-picture ex-photo1" data-box data-x="130" data-y="40" data-w="400" data-h="270" data-z="2"
-				data-img="b"><span class="ex-grip" data-grip></span></div>
+		<div class="ex-stage" data-ref="stage">
+			<div class="ex-stage-label">Stage background</div>
+			
+			<div class="ex-box ex-picture" data-box data-noraise data-x="6" data-y="40" data-w="310" data-h="290"
+				data-z="1" data-img="a"><div class="ex-t ex-pic-label">Picture 1</div><span class="ex-grip" data-grip></span></div>
 
+			<div class="ex-box ex-picture ex-photo1" data-box data-noraise data-x="130" data-y="60" data-w="400" data-h="270" data-z="2"
+				data-img="b"><div class="ex-t ex-pic-label">Picture 2</div><span class="ex-grip" data-grip></span></div>
 
-			<div class="ex-box ex-flat" data-box data-x="10" data-y="230" data-w="150" data-h="120" data-z="3">
-				<div class="ex-t">Flat colour</div><span class="ex-grip" data-grip></span>
+			<div class="ex-box ex-flat" data-box data-x="30" data-y="230" data-w="200" data-h="120" data-z="3">
+				<div class="ex-t">
+					<strong>Flat color</strong><br>
+					<small>Standard rgba() backgrounds are fully supported and corrected</small>
+
+				</div><span class="ex-grip" data-grip></span>
 			</div>
-			<div class="ex-box ex-grad" data-box data-x="200" data-y="300" data-w="125" data-h="100" data-z="4">
-				<div class="ex-t">Gradient</div><span class="ex-grip" data-grip></span>
+			<div class="ex-box ex-grad" data-box data-x="200" data-y="300" data-w="180" data-h="100" data-z="4">
+				<div class="ex-t">
+					<strong>Gradient</strong>
+					<br>
+					<small>CSS gradients cannot be redrawn. They get a contrast veil instead.</small>
+				</div>
+				<span class="ex-grip" data-grip></span>
 			</div>
-			<div class="ex-box ex-rot" data-box data-x="500" data-y="80" data-w="120" data-h="90" data-z="5">
-				<div class="ex-t">Rotated</div><span class="ex-grip" data-grip></span>
+			<div class="ex-box ex-rot" data-box data-x="500" data-y="80" data-w="160" data-h="110" data-z="5">
+				<div class="ex-t">
+					<strong>Rotated</strong>
+					<br>
+					<small>Transformed elements are hard to track. They get a contrast veil instead.</small>
+
+				</div><span class="ex-grip" data-grip></span>
 			</div>
-			<div class="ex-box" data-box data-label="Box A" data-x="30" data-y="60" data-w="200" data-h="100"
+			<div class="ex-box" data-box data-label="Box A" data-x="30" data-y="100" data-w="200" data-h="100"
 				data-z="6">
 				<div class="ex-glass" data-ipax-backdrop><span>Light</span>&nbsp;<span class="ex-k">and
 						dark</span> </div><span class="ex-grip" data-grip></span>
 			</div>
 			<div class="ex-box" data-box data-label="Box B" data-x="300" data-y="230" data-w="310" data-h="120"
 				data-z="7">
-				<div class="ex-glass ex-yellow" data-ipax-backdrop>Yellow text</div><span class="ex-grip" data-grip></span>
+				<div class="ex-glass ex-custom-text" data-ipax-backdrop>Custom color</div><span class="ex-grip" data-grip></span>
 			</div>
 		</div>
 		<p class="ex-report" data-ref="report"></p>
@@ -96,23 +112,28 @@
 		</label>
 			
 		<label class="ex-row">
-			<span>Contrast (WCAG ratio) <sup>2</sup></span>
+			<span>Contrast (WCAG ratio) <sup>2</sup> <small class="ex-hint">Set to <code>1</code> to bypass lightness adaptation</small></span> </span>
 			<span class="ex-pair">
-				<input type="range" data-ctl="contrast" min="1.5" max="15" step="0.5" value="4.5" />
-				<input type="number" data-ctl="contrast" min="1.5" max="15" step="0.5" value="4.5" />
-			</span>
-		</label>
-			
-		<label class="ex-row">
-			<span>Feather (px)</span>
-			<span class="ex-pair">
-				<input type="range" data-ctl="feather" min="0" max="40" step="1" value="14" />
-				<input type="number" data-ctl="feather" min="0" max="40" step="1" value="14" />
+				<input type="range" data-ctl="contrast" min="1" max="15" step="0.5" value="4.5" />
+				<input type="number" data-ctl="contrast" min="1" max="15" step="0.5" value="4.5" />
 			</span>
 		</label>
 
+		
+
+
+
+
 		<details class="ex-disclosure">
-			<summary>Directional feather (TRBL)</summary>
+			<summary class="ex-summary">
+				<div class="ex-row">
+					<span>Feather (px) <small class="ex-hint">(expand TRBL)</small></span>
+					<span class="ex-pair" onclick="event.stopPropagation();" onpointerdown="event.stopPropagation();" onchange="event.stopPropagation();">
+						<input type="range" data-ctl="feather" min="0" max="40" step="1" value="14" />
+						<input type="number" data-ctl="feather" min="0" max="40" step="1" value="14" />
+					</span>
+				</div>
+			</summary>
 			<div class="ex-disclosure-body">
 				<label class="ex-row">
 					<span>Top</span>
@@ -144,13 +165,26 @@
 				</label>
 			</div>
 		</details>
+
+
+
+
+
 			
+		
+		
+		
 		<label class="ex-row">
-			<span>Element blur, CSS (px) <sup>3</sup></span>
+			<span>Element blur (px) <sup>3</sup></span>
 			<span class="ex-pair">
 				<input type="range" data-ctl="blur" min="0" max="16" step="1" value="4" />
 				<input type="number" data-ctl="blur" min="0" max="16" step="1" value="4" />
 			</span>
+		</label>
+
+		<label class="ex-row">
+			<span>Text color (Box B)</span>
+			<input type="color" data-ctl="textcolor" value="#ffd54a" style="justify-self: end;" />
 		</label>
 				
 		<label class="ex-row">
@@ -169,20 +203,31 @@
 		
 		<label class="ex-row"><span>Author gradient (plain CSS)</span><input type="checkbox" data-ctl="grad"></label>
 		
-		<label class="ex-row"><span>Show
-				without effect</span><input type="checkbox" data-ctl="raw"></label><label class="ex-row"><span>Load
-				picture
-				into</span><select data-ref="imgTarget">
+		<label class="ex-row">
+			<span>Show effect on Stage elements</span>
+			<input type="checkbox" class="ex-switch" data-ctl="effect-stage" checked />
+		</label>
+		
+		<label class="ex-row">
+			<span>Upload image to...</span>
+			<select data-ctl="imgTarget">
+				<option value="" selected disabled>Select target...</option>
 				<option value="a">Picture 1</option>
 				<option value="b">Picture 2</option>
-				<option value="hero">Header</option>
 				<option value="stage">Stage background</option>
-			</select></label>
-		
-		<label class="ex-row"><span>Image file</span><input type="file" data-ref="file"
-				accept="image/*"></label>
+				<option disabled>──────────</option>
+				<option value="hero">Page hero</option>
+			</select>
+			<!-- El file input real queda oculto y es disparado por el select -->
+			<input type="file" data-ref="file" accept="image/*" style="display: none;" />
+		</label>
 
-				<br>
+		<br>
+
+
+
+
+
 
 		<p class="ex-small">
 			1. <strong>Tricontrast</strong> keeps the backdrop inside the band where white and black text both reach the ratio. 
@@ -196,7 +241,14 @@
 		
 
 		<p class="ex-small">
-			3. <strong>WCAG is defined for text over a plain colour;</strong> it says nothing about how the formula should be adjusted for text over a picture. In my experiments, image detail "fights" the legibility of the text: without blur, it's better to raise the contrast to the next tier (from 3 to 4.5, and from 4.5 to 7). A blurred backdrop moves the image closer to the flat-field case the model measures, so the reported ratio becomes a more meaningful predictor of legibility.
+			3. <strong>WCAG is defined for text over a plain color;</strong> it says nothing about how the formula should be adjusted for text over a picture. In my experiments, image detail "fights" the legibility of the text: without blur, it's better to raise the contrast to the next tier (from 3 to 4.5, and from 4.5 to 7). A blurred backdrop moves the image closer to the flat-field case the model measures, so the reported ratio becomes a more meaningful predictor of legibility.<br>
+			<em>&mdash; Santiago Bustelo</em>
+		</p>
+
+		<hr style="margin:20pt 0">
+
+		<p class="ex-small">
+			IPAX-backdrop v0.1.03 • November 2026. Part of the <a href="https://ipax.bustelo.com.ar/">IPAX System</a>.
 		</p>
 
 

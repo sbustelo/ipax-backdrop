@@ -115,14 +115,21 @@
 			}
 		} else if (k === 'blur') {
 			stage.style.setProperty('--ex-blur', c.value + 'px');
+			stage.querySelectorAll('.ex-glass, .example-hero-block').forEach((g) => {
+				g.style.setProperty('--ipax-backdrop-blur', c.value + 'px');
+			});
 		} else if (k === 'backend') {
 			ipax.config.backend = c.value;
 		} else if (k === 'overlay') {
 			stage.classList.toggle('ex-s-overlay', c.checked);
 		} else if (k === 'grad') {
 			stage.classList.toggle('ex-s-grad', c.checked);
-		} else if (k === 'raw') {
-			stage.classList.toggle('ex-raw', c.checked);
+		} else if (k === 'master-toggle' || k === 'effect-hero') {
+			hero.classList.toggle('ex-raw', !c.checked);
+		} else if (k === 'raw' || k === 'effect-stage') {
+			stage.classList.toggle('ex-raw', !c.checked);
+		} else if (k === 'textcolor') {
+			stage.style.setProperty('--ex-custom-color', c.value);
 		}
 
 		ipax.refresh();
@@ -130,9 +137,22 @@
 
 	/* ---------- Upload: read, downscale, store as a data URL ---------- */
 	root.addEventListener('change', (e) => {
+		// Proxy del Select al File Input
+		const sel = e.target.closest('[data-ctl="imgTarget"]');
+		if (sel) {
+			if (sel.value) {
+				const fInput = ref('file');
+				fInput.dataset.target = sel.value; // Guardamos el destino
+				fInput.click(); // Disparamos diálogo de OS
+				sel.value = ""; // Reseteamos UI a "Select target..."
+			}
+			return;
+		}
+
 		const f = e.target.closest('[data-ref="file"]');
 		if (!f || !f.files[0]) return;
-		const key = ref('imgTarget').value;
+		
+		const key = f.dataset.target;
 		const dst = key === 'hero' ? hero : key === 'stage' ? stage : stage.querySelector('[data-img="' + key + '"]');
 		const fr = new FileReader();
 		fr.onload = () => {
@@ -145,6 +165,10 @@
 				g.drawImage(img, 0, 0, c.width, c.height);
 				setBg(dst, c.toDataURL('image/jpeg', 0.82));
 				f.value = '';
+				
+				if (key === 'hero') {
+					hero.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				}
 			};
 			img.src = fr.result;
 		};

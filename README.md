@@ -8,8 +8,9 @@ A vanilla JavaScript & WebGL backdrop-filter to get accessible frosted glass.
 .glass {
   --ipax-backdrop-contrast: 4.5;     /* WCAG ratio */
   --ipax-backdrop-feather: 14px;     /* optional. Default: 0 */
+  --ipax-backdrop-blur: 6px;         /* integrated gradual blur */
   --ipax-backdrop-mode: default;     /* or tricontrast */
-  backdrop-filter: blur(6px);        /* adding standard CSS blur removes residual high-frequency detail that "fights" text */
+  backdrop-filter: blur(6px);        /* standard CSS blur acts as a fallback for unknown background areas */
 }
 ```
 
@@ -32,6 +33,10 @@ Load `dist/ipax-backdrop.js`, which is built from all files from lib/ and src/ i
 Then declare the properties on any element that sits over a photo. The library starts by itself on `DOMContentLoaded`. See `examples/index.html` for a working page.
 
 If the rule that declares the properties lives in a stylesheet the browser will not let scripts read (cross-origin, or a linked file opened from `file://`), add the attribute `data-ipax-backdrop` to the element.
+
+### Linear / Gradual Blur (Bypass mode)
+
+If you only want a directional, gradual blur without lightness adaptation, set `--ipax-backdrop-contrast: 1`. This short-circuits the OKLab solver at zero computational cost, using the `--ipax-backdrop-feather` mask to smoothly fade the `--ipax-backdrop-blur` effect.
 
 ## Documentation
 

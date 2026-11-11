@@ -4,10 +4,11 @@ ipax-backdrop is configured with CSS custom properties. The library reads them w
 
 ```css
 .glass {
-  backdrop-filter: blur(6px);          /* the blur is yours: plain CSS */
   --ipax-backdrop-contrast: 4.5;
   --ipax-backdrop-feather: 14px;
+  --ipax-backdrop-blur: 6px;           /* integrated gradual blur */
   --ipax-backdrop-mode: default;
+  backdrop-filter: blur(6px);        /* standard CSS blur acts as a fallback for unknown background areas */
 }
 ```
 
@@ -16,6 +17,7 @@ ipax-backdrop is configured with CSS custom properties. The library reads them w
 | Property | Values | Default | Meaning |
 |---|---|---|---|
 | `--ipax-backdrop-contrast` | number, `1` to `15` | `4.5` | Minimum WCAG 2.x contrast ratio between the text and the corrected backdrop. Set to `1` to bypass lightness adaptation. |
+| `--ipax-backdrop-blur` | length (`px` or unitless) | `0` | Internal spatial blur applied to the known backdrop, fading in gradually alongside the feather mask. |
 | `--ipax-backdrop-feather` | 1 to 4 lengths (`px` or unitless) | `0` | Soft edge shorthand following CSS TRBL convention (top, right, bottom, left). Contrast is guaranteed only where fully applied; keep element padding larger than feather. |
 | `--ipax-backdrop-feather-top` | length (`px` or unitless) | inherited | Directional override for top edge feathering. Overrules shorthand. |
 | `--ipax-backdrop-feather-right` | length (`px` or unitless) | inherited | Directional override for right edge feathering. Overrules shorthand. |
@@ -50,6 +52,7 @@ ipax-backdrop is configured with CSS custom properties. The library reads them w
 
 - **`default`**: for the text colour of the element, move the backdrop lightness (L in OKLab) toward the extreme that contrasts more, only as far as needed. Text runs with another colour (a `<b>` or `<span>` with its own colour) get their own correction, blended smoothly with their neighbours.
 - **`tricontrast`**: keep the backdrop inside the luminance band where **both white and black text** reach the ratio, so text of both colours can share one box. The band exists only up to about 4.54:1; at 4.5:1 it is almost a single grey and the photo flattens. Above that the element is reported as unreachable.
+- **Bypass (Linear Blur)**: While not technically a `mode` value, setting `--ipax-backdrop-contrast: 1` short-circuits the lightness solver entirely. When combined with `--ipax-backdrop-blur` and `--ipax-backdrop-feather`, this transforms the engine into a high-performance directional gradual blur utility. Note: the default contrast is `4.5`, so you must explicitly declare `1` to trigger the bypass.
 
 ## Declaring which elements are managed
 

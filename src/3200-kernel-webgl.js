@@ -27,8 +27,8 @@
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
-	const UNIFORMS = ['uEst', 'uGrid', 'uSize', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
-	const state = { canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, buf: null, aPos: -1, broken: false, why: '' };
+	const UNIFORMS = ['uEst', 'uEstBlur', 'uHasBlur', 'uGrid', 'uSize', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
+	const state = { canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, buf: null, aPos: -1, broken: false, why: '' };
 
 	function fail(why) { state.broken = true; state.why = why; state.gl = null; return false; }
 
@@ -86,6 +86,7 @@
 			state.aPos = gl.getAttribLocation(prog, 'aPos');
 			state.texEst = makeTexture(gl);
 			state.texGrid = makeTexture(gl);
+			state.texBlur = makeTexture(gl);
 			return true;
 		} catch (err) {
 			return fail(String(err && err.message || err));
@@ -95,7 +96,7 @@
 	function render(input) {
 		if (!init()) throw new Error(state.why || 'WebGL unavailable');
 		const K = svc('contrast'), maxRuns = svc('limits').maxRuns, maxC = maxRuns + 1;
-		const { est, grid, w, h, s, W, H, params, colors } = input;
+		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
 		const gl = state.gl, L = state.loc;
 
 		if (state.canvas.width !== w || state.canvas.height !== h) { state.canvas.width = w; state.canvas.height = h; }
@@ -113,6 +114,19 @@
 				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, est);
 				hasEst = 1;
 			} catch (e) { tainted = true; }
+		}
+
+		// Blurred estimate -> texture unit 2.
+		let hasBlur = 0;
+		if (estBlur && !tainted) {
+			try {
+				gl.activeTexture(gl.TEXTURE2);
+				gl.bindTexture(gl.TEXTURE_2D, state.texBlur);
+				gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+				gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, estBlur);
+				hasBlur = 1;
+			} catch (e) { } // silent fail, falls back to sharp
 		}
 
 		// Unknown cells -> texture unit 1.
@@ -135,6 +149,8 @@
 
 		gl.uniform1i(L.uEst, 0);
 		gl.uniform1i(L.uGrid, 1);
+		gl.uniform1i(L.uEstBlur, 2);
+		gl.uniform1f(L.uHasBlur, hasBlur);
 		gl.uniform2f(L.uSize, w, h);
 		gl.uniform2f(L.uDim, W, H);
 		gl.uniform1f(L.uScale, s);

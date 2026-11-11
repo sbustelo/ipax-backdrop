@@ -88,8 +88,10 @@
 		if (colors.truncated) warnOnce(el, 'More than ' + svc('limits').maxRuns + ' differently coloured text runs: the extra ones use the base colour.');
 
 		const res = svc('resolver').resolve(rec, R, s, w, h, Math.max(4, cfg.cellSize));
-		const out = svc('kernel').render({ est: res.est, grid: res.grid, w, h, s, W: R.width, H: R.height, params, colors });
-		compositor.draw(rec, w, h, out); // must happen right away: a WebGL result is only valid until the next render
+		const estBlur = params.blur > 0 ? svc('blur').blur(res.est, w, h, params.blur * s) : null;
+		
+		const out = svc('kernel').render({ est: res.est, estBlur, grid: res.grid, w, h, s, W: R.width, H: R.height, params, colors });
+		compositor.draw(rec, w, h, out, params.blur); // must happen right away: a WebGL result is only valid until the next render
 
 		emit('updated', { element: el, ms: performance.now() - t0, backend: out.backend, stats: out.stats, resolver: res.stats, tainted: !!out.tainted, params });
 	}

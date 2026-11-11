@@ -93,12 +93,14 @@
 			get('feather-bottom'),
 			get('feather-left')
 		);
+		const b = parseFloat(get('blur'));
 		return {
 			ok: c.ok,
 			reason: c.reason || '',
 			ratio: c.ratio || 4.5,
 			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
 			feather,
+			blur: b > 0 ? b : 0,
 			color: cs.color
 		};
 	}

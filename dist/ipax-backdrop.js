@@ -1,68 +1,72 @@
-/**
- * IPAX BACKDROP BUNDLE
- * Compiled: 2026-11-10 23:24:12
- */
+/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: 2026-11-11 */
 
 /* --- lib/j0-kernel/01-bus-j0kernel.js --- */
-/* j0 framework kernel 0.4.0 • 9/jul/2026
+/* j0 framework kernel 0.4.01 • 11/nov/2026
  * Santiago Bustelo, https://bustelo.com.ar/ 
  * Apache License, Version 2.0 */
 
-class EventChannel {
-    constructor(name) {
-        this.name = name;
-        this._handlers = new Map();
-    }
+(function () {
+    'use strict';
 
-    emit(action, payload = {}) {
-        if (window.j0 && window.j0.QA && window.j0.bus && window.j0.bus.schema) {
-            const contract = window.j0.bus.schema[action];
-            if (contract) {
-                for (const [key, expectedType] of Object.entries(contract)) {
-                    const actualType = typeof payload[key];
-                    if (actualType !== expectedType) {
-                        const msg = `[J0_BUS_SCHEMA] Payload inválido en evento '${action}': '${key}' debe ser '${expectedType}', recibido '${actualType}'.`;
-                        if (window.j0?.logger) window.j0.logger.error(msg);
-                        else console.error(msg);
-                        throw new Error(msg);
+    window.j0 = window.j0 || {};
+    if (window.j0.EventChannel) return;
+
+    window.j0.EventChannel = class EventChannel {
+        constructor(name) {
+            this.name = name;
+            this._handlers = new Map();
+        }
+
+        emit(action, payload = {}) {
+            if (window.j0 && window.j0.QA && window.j0.bus && window.j0.bus.schema) {
+                const contract = window.j0.bus.schema[action];
+                if (contract) {
+                    for (const [key, expectedType] of Object.entries(contract)) {
+                        const actualType = typeof payload[key];
+                        if (actualType !== expectedType) {
+                            const msg = `[J0_BUS_SCHEMA] Payload inválido en evento '${action}': '${key}' debe ser '${expectedType}', recibido '${actualType}'.`;
+                            if (window.j0?.logger) window.j0.logger.error(msg);
+                            else console.error(msg);
+                            throw new Error(msg);
+                        }
                     }
                 }
             }
+
+            const set = this._handlers.get(action);
+            if (!set || set.size === 0) return;
+            
+            new Set(set).forEach(fn => {
+                try { 
+                    fn(payload); 
+                } catch (e) { 
+                    const fnSource = fn.toString().substring(0, 50) + "...";
+                    if (window.j0 && window.j0.logger) {
+                        window.j0.logger.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}'. Handler: ${fnSource}`, e);
+                    } else {
+                        console.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}':`, e);
+                    }
+                }
+            });
         }
 
-        const set = this._handlers.get(action);
-        if (!set || set.size === 0) return;
-        
-        new Set(set).forEach(fn => {
-            try { 
-                fn(payload); 
-            } catch (e) { 
-                const fnSource = fn.toString().substring(0, 50) + "...";
-                if (window.j0 && window.j0.logger) {
-                    window.j0.logger.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}'. Handler: ${fnSource}`, e);
-                } else {
-                    console.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}':`, e);
+        on(action, handler) {
+            if (!this._handlers.has(action)) this._handlers.set(action, new Set());
+            this._handlers.get(action).add(handler);
+            return () => {
+                const set = this._handlers.get(action);
+                if (set) {
+                    set.delete(handler);
+                    if (set.size === 0) this._handlers.delete(action);
                 }
-            }
-        });
-    }
-
-    on(action, handler) {
-        if (!this._handlers.has(action)) this._handlers.set(action, new Set());
-        this._handlers.get(action).add(handler);
-        return () => {
-            const set = this._handlers.get(action);
-            if (set) {
-                set.delete(handler);
-                if (set.size === 0) this._handlers.delete(action);
-            }
-        };
-    }
-}
+            };
+        }
+    };
+})();
 ;
 
 /* --- lib/j0-kernel/02-core-j0kernel.js --- */
-/* j0 framework kernel 0.4.0 • 9/jul/2026
+/* j0 framework kernel 0.4.01 • 11/nov/2026
  * Santiago Bustelo, https://bustelo.com.ar/ 
  * Apache License, Version 2.0 */
 
@@ -73,8 +77,8 @@ class EventChannel {
 
 	window.j0 = window.j0 || {};
 	
-	// [!] RESTAURACIÓN ARQUITECTÓNICA: Instanciación real del Bus de Eventos.
-	window.j0.bus = window.j0.bus || new EventChannel("global");
+	// [!] Instanciación real del Bus de Eventos.
+	window.j0.bus = window.j0.bus || new window.j0.EventChannel("global");
 	window.j0.bus.schema = window.j0.bus.schema || {};
 
 	window.j0.registry = window.j0.registry || new Map();
@@ -382,6 +386,8 @@ class EventChannel {
  *   ratio(yA, yB)                    WCAG contrast ratio of two relative luminances.
  *   parseContrast(raw)               CSS value -> {ok, ratio} | {ok:false, reason}
  *   solveRatio(ratio)                ratio the solver aims for (see SAFETY)
+ *   isBypass(ratio)                  true when ratio <= 1: every colour pair already meets it, so the
+ *                                    kernels skip the solve and the veil (blur-only mode)
  *   prepareColor(rgb255, solveR)     per text colour: {yT, pkL, pkR, al, vc}
  *   band(ratio)                      tricontrast luminance band {lo, hi, ok}
  *   bandVeil(band)                   translucent grey veil that lands in the band {al, vc}
@@ -405,6 +411,8 @@ class EventChannel {
 
 	const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 	const solveRatio = (r) => r * SAFETY;
+	/** WCAG ratios are never below 1, so ratio <= 1 asks for nothing. */
+	const isBypass = (r) => r <= 1;
 
 	function parseContrast(raw) {
 		const s = (raw || '').trim();
@@ -452,7 +460,7 @@ class EventChannel {
 		return { al: Math.min(1, al + 0.004), vc: C.clamp01(vlo / al) * 255 };
 	}
 
-	window.j0.register('ipax-backdrop:contrast', { MAX_WCAG_RATIO, ratio, parseContrast, solveRatio, prepareColor, band, bandVeil });
+	window.j0.register('ipax-backdrop:contrast', { MAX_WCAG_RATIO, ratio, parseContrast, solveRatio, isBypass, prepareColor, band, bandVeil });
 })();
 ;
 
@@ -547,8 +555,10 @@ class EventChannel {
 		if (colors.truncated) warnOnce(el, 'More than ' + svc('limits').maxRuns + ' differently coloured text runs: the extra ones use the base colour.');
 
 		const res = svc('resolver').resolve(rec, R, s, w, h, Math.max(4, cfg.cellSize));
-		const out = svc('kernel').render({ est: res.est, grid: res.grid, w, h, s, W: R.width, H: R.height, params, colors });
-		compositor.draw(rec, w, h, out); // must happen right away: a WebGL result is only valid until the next render
+		const estBlur = params.blur > 0 ? svc('blur').blur(res.est, w, h, params.blur * s) : null;
+		
+		const out = svc('kernel').render({ est: res.est, estBlur, grid: res.grid, w, h, s, W: R.width, H: R.height, params, colors });
+		compositor.draw(rec, w, h, out, params.blur); // must happen right away: a WebGL result is only valid until the next render
 
 		emit('updated', { element: el, ms: performance.now() - t0, backend: out.backend, stats: out.stats, resolver: res.stats, tainted: !!out.tainted, params });
 	}
@@ -689,12 +699,14 @@ class EventChannel {
 			get('feather-bottom'),
 			get('feather-left')
 		);
+		const b = parseFloat(get('blur'));
 		return {
 			ok: c.ok,
 			reason: c.reason || '',
 			ratio: c.ratio || 4.5,
 			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
 			feather,
+			blur: b > 0 ? b : 0,
 			color: cs.color
 		};
 	}
@@ -1122,6 +1134,128 @@ class EventChannel {
 })();
 ;
 
+/* --- src/2300-resolutor-desenfoque.js --- */
+/**
+ * ipax-backdrop / 2300-resolutor-desenfoque.js
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * CHAPTER 2 - RESOLVER (blur): a blurred copy of the backdrop estimate.
+ *
+ * The kernels mix the sharp and the blurred estimate with the feather mask,
+ * so the blur fades in from the element edge exactly like the contrast
+ * correction does. It is done ONCE, here, in JavaScript, and handed to both
+ * kernels as a second image.
+ *
+ * ARCHITECTURE OPTIMIZATIONS (Zero GC, Zero Cache-Miss):
+ * 1. Persistent scratchpads (bufA, bufB) to eliminate frame-drop allocations.
+ * 2. Planar RGB extraction to process channels continuously.
+ * 3. 1D Box Blur commutative transposing: H, H, H -> Transpose -> H, H, H.
+ *    Vertical passes are done horizontally in memory to maximize CPU L1/L2 cache hits.
+ * 4. Pure integer arithmetic.
+ *
+ * Service 'ipax-backdrop:blur':
+ *   blur(est, w, h, sigma) -> HTMLCanvasElement | null
+ */
+(function () {
+	'use strict';
+	if (!window.j0 || !window.j0.register) return;
+
+	let bufA = new Uint32Array(0);
+	let bufB = new Uint32Array(0);
+
+	const boxRadius = (sigma) => Math.max(1, Math.round((Math.sqrt(4 * sigma * sigma + 1) - 1) / 2));
+
+	/** Optimized 1D Box Blur with clamping and integer division */
+	function pass1D(s, d, len, count, r) {
+		const diam = 2 * r + 1;
+		for (let j = 0; j < count; j++) {
+			const base = j * len;
+			let acc = s[base] * (r + 1);
+			for (let i = 1; i <= r; i++) {
+				acc += s[base + (i < len ? i : len - 1)];
+			}
+			for (let i = 0; i < len; i++) {
+				d[base + i] = (acc / diam) | 0;
+				const right = i + r + 1;
+				const left = i - r;
+				acc += s[base + (right < len ? right : len - 1)] - s[base + (left >= 0 ? left : 0)];
+			}
+		}
+	}
+
+	function blur(est, w, h, sigma) {
+		if (!est || !(sigma >= 0.3)) return null;
+		let data;
+		try { data = est.getContext('2d').getImageData(0, 0, w, h).data; } catch (e) { return null; }
+
+		const n = w * h;
+		const reqSpace = n * 3;
+		
+		// Grow scratchpads if needed, adding a 60k margin to avoid reallocation jitter
+		if (bufA.length < reqSpace) {
+			const newLen = reqSpace + 180000;
+			bufA = new Uint32Array(newLen);
+			bufB = new Uint32Array(newLen);
+		}
+
+		// 1. Extract interleaved RGBA into planar contiguous R, G, B
+		for (let i = 0; i < n; i++) {
+			const q = i * 4;
+			bufA[i] = data[q];
+			bufA[i + n] = data[q + 1];
+			bufA[i + n * 2] = data[q + 2];
+		}
+
+		const r = boxRadius(sigma);
+
+		// 2. Horizontal passes (3 passes, approximating Gaussian)
+		pass1D(bufA, bufB, w, h * 3, r);
+		pass1D(bufB, bufA, w, h * 3, r);
+		pass1D(bufA, bufB, w, h * 3, r);
+
+		// 3. Transpose image to process vertical blur horizontally
+		for (let c = 0; c < 3; c++) {
+			const offC = c * n;
+			for (let y = 0; y < h; y++) {
+				let offS = offC + y * w;
+				let offD = offC + y;
+				for (let x = 0; x < w; x++) {
+					bufA[offD] = bufB[offS++];
+					offD += h;
+				}
+			}
+		}
+
+		// 4. Vertical passes (now running horizontally in RAM)
+		// Note: transposed image has lines of length 'h', and 'w' lines per channel
+		pass1D(bufA, bufB, h, w * 3, r);
+		pass1D(bufB, bufA, h, w * 3, r);
+		pass1D(bufA, bufB, h, w * 3, r);
+
+		// 5. Transpose back and interleave directly into RGBA output
+		const out = new Uint8ClampedArray(n * 4);
+		for (let y = 0; y < h; y++) {
+			for (let x = 0; x < w; x++) {
+				const outIdx = (y * w + x) * 4;
+				const inIdx = x * h + y;
+				
+				out[outIdx] = bufB[inIdx];
+				out[outIdx + 1] = bufB[inIdx + n];
+				out[outIdx + 2] = bufB[inIdx + n * 2];
+				out[outIdx + 3] = 255;
+			}
+		}
+
+		const cv = document.createElement('canvas');
+		cv.width = w; cv.height = h;
+		cv.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
+		return cv;
+	}
+
+	window.j0.register('ipax-backdrop:blur', { blur, boxRadius });
+})();
+;
+
 /* --- src/3000-kernel.js --- */
 /**
  * ipax-backdrop / 3000-kernel.js
@@ -1138,11 +1272,14 @@ class EventChannel {
  *   render(input) -> {source, stats, tainted}
  *   input = {
  *     est      HTMLCanvasElement  estimated backdrop (w x h), from the resolver
+ *     estBlur  HTMLCanvasElement | null   the same estimate blurred (2300). Mixed with `est` by the
+ *                                 feather mask before the lightness solve; null = no blur
  *     grid     {V, nx, ny, g}     unknown cells, from the resolver
  *     w, h     working size in px
  *     s        working px per CSS px
  *     W, H     element size in CSS px
- *     params   {ratio, mode, feather}     from the reader
+ *     params   {ratio, mode, feather, blur}   from the reader. ratio <= 1 (contrast.isBypass) skips the
+ *                                 solve and the veil: the output is just the (blurred) estimate
  *     colors   {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}   from reader-text
  *   }
  *   source   ImageData (CPU) or HTMLCanvasElement (WebGL), w x h. Pixels are
@@ -1234,12 +1371,6 @@ class EventChannel {
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
-
-
-
-
-
-
 	function veilFrac(grid, rx, ry) {
 		const V = grid.V, nx = grid.nx, ny = grid.ny, g = grid.g;
 		const gv = (i, j) => V[Math.min(ny - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
@@ -1250,17 +1381,22 @@ class EventChannel {
 	function render(input) {
 		const C = svc('color'), K = svc('contrast');
 		const LUT = C.LUT, clamp01 = C.clamp01, smooth = C.smooth, lum = C.luminance, toSrgb = C.toSrgb255, cr = K.ratio;
-		const { est, grid, w, h, s, W, H, params, colors } = input;
+		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
 
-		let pix = null, tainted = false;
-		if (est) { try { pix = est.getContext('2d').getImageData(0, 0, w, h).data; } catch (e) { tainted = true; } }
+		let pix = null, blurPix = null, tainted = false;
+		if (est) { 
+			try { 
+				pix = est.getContext('2d').getImageData(0, 0, w, h).data; 
+				if (estBlur) blurPix = estBlur.getContext('2d').getImageData(0, 0, w, h).data;
+			} catch (e) { tainted = true; } 
+		}
 
 		const out = new Uint8ClampedArray(w * h * 4);
 		const tri = params.mode === 'tricontrast', ratio = params.ratio, rS = K.solveRatio(ratio);
 		const fParam = params.feather;
-		const f = (typeof fParam === 'number')
-			? { top: fParam, right: fParam, bottom: fParam, left: fParam }
-			: (fParam || { top: 0, right: 0, bottom: 0, left: 0 });
+		const f = (typeof fParam === 'object' && fParam !== null)
+			? fParam
+			: (typeof fParam === 'number' ? { top: fParam, right: fParam, bottom: fParam, left: fParam } : { top: 0, right: 0, bottom: 0, left: 0 });
 		const fT = f.top > 0 ? f.top : 0, fR = f.right > 0 ? f.right : 0, fB = f.bottom > 0 ? f.bottom : 0, fL = f.left > 0 ? f.left : 0;
 		const hasFeather = fT > 0 || fR > 0 || fB > 0 || fL > 0;
 
@@ -1325,23 +1461,35 @@ class EventChannel {
 
 				let ir = 0, ig = 0, ib = 0;
 				if (known > 0) {
-					const fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
-					C.linToOklab(fr, fg, fb, ok);
-					const L0 = ok[0], A = ok[1], B = ok[2];
-					let Lt;
-					if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
-					else {
-						Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
-						if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+					let fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
+					
+					if (blurPix) {
+						const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
+						fr = fr + M * (br - fr);
+						fg = fg + M * (bg - fg);
+						fb = fb + M * (bb - fb);
 					}
-					C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
-					ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
-					if (M >= 0.999 && known >= 0.999) {
-						const Y = lum(lin[0], lin[1], lin[2]);
-						const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
-						if (v < minV) minV = v;
-						if (v < ratio - 1e-6) under++;
-						nI++;
+					
+					if (K.isBypass(ratio)) {
+						ir = toSrgb(fr); ig = toSrgb(fg); ib = toSrgb(fb);
+					} else {
+						C.linToOklab(fr, fg, fb, ok);
+						const L0 = ok[0], A = ok[1], B = ok[2];
+						let Lt;
+						if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
+						else {
+							Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
+							if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+						}
+						C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
+						ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
+						if (M >= 0.999 && known >= 0.999) {
+							const Y = lum(lin[0], lin[1], lin[2]);
+							const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
+							if (v < minV) minV = v;
+							if (v < ratio - 1e-6) under++;
+							nI++;
+						}
 					}
 				} else if (M >= 0.999) nV++;
 
@@ -1392,8 +1540,8 @@ class EventChannel {
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
-	const UNIFORMS = ['uEst', 'uGrid', 'uSize', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
-	const state = { canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, buf: null, aPos: -1, broken: false, why: '' };
+	const UNIFORMS = ['uEst', 'uEstBlur', 'uHasBlur', 'uGrid', 'uSize', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
+	const state = { canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, buf: null, aPos: -1, broken: false, why: '' };
 
 	function fail(why) { state.broken = true; state.why = why; state.gl = null; return false; }
 
@@ -1451,6 +1599,7 @@ class EventChannel {
 			state.aPos = gl.getAttribLocation(prog, 'aPos');
 			state.texEst = makeTexture(gl);
 			state.texGrid = makeTexture(gl);
+			state.texBlur = makeTexture(gl);
 			return true;
 		} catch (err) {
 			return fail(String(err && err.message || err));
@@ -1460,7 +1609,7 @@ class EventChannel {
 	function render(input) {
 		if (!init()) throw new Error(state.why || 'WebGL unavailable');
 		const K = svc('contrast'), maxRuns = svc('limits').maxRuns, maxC = maxRuns + 1;
-		const { est, grid, w, h, s, W, H, params, colors } = input;
+		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
 		const gl = state.gl, L = state.loc;
 
 		if (state.canvas.width !== w || state.canvas.height !== h) { state.canvas.width = w; state.canvas.height = h; }
@@ -1478,6 +1627,19 @@ class EventChannel {
 				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, est);
 				hasEst = 1;
 			} catch (e) { tainted = true; }
+		}
+
+		// Blurred estimate -> texture unit 2.
+		let hasBlur = 0;
+		if (estBlur && !tainted) {
+			try {
+				gl.activeTexture(gl.TEXTURE2);
+				gl.bindTexture(gl.TEXTURE_2D, state.texBlur);
+				gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+				gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, estBlur);
+				hasBlur = 1;
+			} catch (e) { } // silent fail, falls back to sharp
 		}
 
 		// Unknown cells -> texture unit 1.
@@ -1500,6 +1662,8 @@ class EventChannel {
 
 		gl.uniform1i(L.uEst, 0);
 		gl.uniform1i(L.uGrid, 1);
+		gl.uniform1i(L.uEstBlur, 2);
+		gl.uniform1f(L.uHasBlur, hasBlur);
 		gl.uniform2f(L.uSize, w, h);
 		gl.uniform2f(L.uDim, W, H);
 		gl.uniform1f(L.uScale, s);
@@ -1575,167 +1739,11 @@ class EventChannel {
 		'void main() { gl_Position = vec4(aPos, 0.0, 1.0); }'
 	].join('\n');
 
-	const FRAGMENT = `
-precision highp float;
-#define MAXRUNS __MAXRUNS__
+/* glsl-minifier-start */
+const FRAGMENT = `precision highp float; #define MAXRUNS __MAXRUNS__
 #define MAXC __MAXC__
-
-uniform sampler2D uEst;     // estimated backdrop (RGBA8, row 0 = top)
-uniform sampler2D uGrid;    // unknown cells (LUMINANCE, 1.0 = unknown)
-uniform vec2  uSize;        // working size in px
-uniform vec2  uDim;         // element size in CSS px
-uniform float uScale;       // working px per CSS px
-uniform vec4  uFeather;     // CSS px: top, right, bottom, left
-uniform vec3  uGridInfo;    // nx, ny, cell size (CSS px)
-uniform float uHasEst;      // 0.0 when the estimate could not be uploaded
-uniform float uTri;         // 1.0 = tricontrast
-uniform float uRatioS;      // ratio the solver aims for (with safety margin)
-uniform vec2  uBand;        // tricontrast band: lo, hi (luminance)
-uniform vec2  uTriVeil;     // tricontrast veil: alpha, level 0..1
-uniform int   uRunCount;
-uniform vec4  uRun[MAXRUNS];  // x0, y0, x1, y1 in CSS px relative to the element
-uniform float uYT[MAXC];      // text luminance; index 0 = base colour, 1.. = runs
-uniform float uPk[MAXC];      // 1.0 = lighten the backdrop, 0.0 = darken it
-uniform float uAl[MAXC];      // veil alpha
-uniform float uVc[MAXC];      // veil level 0..1
-
-float sm(float m) { return m * m * (3.0 - 2.0 * m); }
-float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
-float toSrgb(float l) { l = clamp(l, 0.0, 1.0); return l <= 0.0031308 ? 12.92 * l : 1.055 * pow(l, 1.0 / 2.4) - 0.055; }
-float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-float cr(float a, float b) { return (max(a, b) + 0.05) / (min(a, b) + 0.05); }
-float cbrt(float x) { return x <= 0.0 ? 0.0 : pow(x, 1.0 / 3.0); }
-
-vec3 linToOk(vec3 c) {
-  float l = cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b);
-  float m = cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b);
-  float s = cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b);
-  return vec3(
-    0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
-    1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
-    0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s);
-}
-
-vec3 okToLin(float L, float a, float b) {
-  float l = L + 0.3963377774 * a + 0.2158037573 * b; l = l * l * l;
-  float m = L - 0.1055613458 * a - 0.0638541728 * b; m = m * m * m;
-  float s = L - 0.0894841775 * a - 1.2914855480 * b; s = s * s * s;
-  return clamp(vec3(
-     4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 0.0, 1.0);
-}
-
-void colorOf(int idx, out float yT, out float pk, out float al, out float vc) {
-  yT = uYT[0]; pk = uPk[0]; al = uAl[0]; vc = uVc[0];
-  for (int k = 1; k < MAXC; k++) {
-    if (k == idx) { yT = uYT[k]; pk = uPk[k]; al = uAl[k]; vc = uVc[k]; }
-  }
-}
-
-float gridAt(float i, float j) {
-  float nx = uGridInfo.x; float ny = uGridInfo.y;
-  float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0);
-  return texture2D(uGrid, vec2((ci + 0.5) / nx, (cj + 0.5) / ny)).r;
-}
-
-float veilFrac(float rx, float ry) {
-  float g = uGridInfo.z;
-  float fx = rx / g - 0.5; float fy = ry / g - 0.5;
-  float ci = floor(fx); float cj = floor(fy);
-  float tx = fx - ci; float ty = fy - cj;
-  return (gridAt(ci, cj) * (1.0 - tx) + gridAt(ci + 1.0, cj) * tx) * (1.0 - ty)
-       + (gridAt(ci, cj + 1.0) * (1.0 - tx) + gridAt(ci + 1.0, cj + 1.0) * tx) * ty;
-}
-
-float defL(float L0, float A, float B, vec3 lin0, float yT, float pk) {
-  if (cr(yT, lum(lin0)) >= uRatioS) return L0;
-  if (cr(yT, lum(okToLin(pk, A, B))) < uRatioS) return pk;
-  float lo = L0; float hi = pk;
-  for (int n = 0; n < 9; n++) {
-    float mid = (lo + hi) * 0.5;
-    if (cr(yT, lum(okToLin(mid, A, B))) >= uRatioS) hi = mid; else lo = mid;
-  }
-  return hi;
-}
-
-float triL(float L0, float A, float B, float Y0) {
-  if (Y0 >= uBand.x && Y0 <= uBand.y) return L0;
-  bool up = Y0 < uBand.x;
-  float target = up ? uBand.x : uBand.y;
-  float lo = up ? L0 : 0.0; float hi = up ? 1.0 : L0;
-  for (int n = 0; n < 13; n++) {
-    float mid = (lo + hi) * 0.5;
-    if (lum(okToLin(mid, A, B)) < target) lo = mid; else hi = mid;
-  }
-  return (lo + hi) * 0.5;
-}
-
-void main() {
-  // Pixel centre in working px, y measured from the top like the CPU path.
-  vec2 px = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y);
-  float rx = px.x / uScale;
-  float ry = px.y / uScale;
-
-  float M = 1.0;
-  float mT = uFeather.x > 0.0 ? clamp(ry / uFeather.x, 0.0, 1.0) : 1.0;
-  float mR = uFeather.y > 0.0 ? clamp((uDim.x - rx) / uFeather.y, 0.0, 1.0) : 1.0;
-  float mB = uFeather.z > 0.0 ? clamp((uDim.y - ry) / uFeather.z, 0.0, 1.0) : 1.0;
-  float mL = uFeather.w > 0.0 ? clamp(rx / uFeather.w, 0.0, 1.0) : 1.0;
-  M = sm(min(min(mT, mR), min(mB, mL)));
-
-  float known = 0.0;
-  if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry);
-
-
-
-
-
-
-  float wk = 0.0;
-  int kk = -1;
-  if (uTri < 0.5) {
-    for (int k = 0; k < MAXRUNS; k++) {
-      if (k >= uRunCount) break;
-      vec4 r = uRun[k];
-      float dx = max(max(r.x - rx, 0.0), rx - r.z);
-      float dy = max(max(r.y - ry, 0.0), ry - r.w);
-      float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / 6.0, 0.0, 1.0));
-      if (wg > wk) { wk = wg; kk = k; }
-    }
-  }
-
-  vec3 img = vec3(0.0);
-  if (known > 0.0) {
-    vec4 e = texture2D(uEst, vec2(px.x / uSize.x, px.y / uSize.y));
-    vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b));
-    vec3 ok = linToOk(lin0);
-    float Lt;
-    if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0));
-    else {
-      float yT; float pk; float al; float vc;
-      colorOf(0, yT, pk, al, vc);
-      Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk);
-      if (kk >= 0) {
-        colorOf(kk + 1, yT, pk, al, vc);
-        Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt);
-      }
-    }
-    vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z);
-    img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b));
-  }
-
-  float pAl; float pVc;
-  if (uTri > 0.5) { pAl = uTriVeil.x; pVc = uTriVeil.y; }
-  else { float yT2; float pk2; colorOf(wk > 0.5 ? kk + 1 : 0, yT2, pk2, pAl, pVc); }
-
-  float wV = (1.0 - known) * pAl * M;
-  float aO = known + wV;
-  if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; }
-  vec3 col = (known * img + wV * vec3(pVc)) / aO;
-  gl_FragColor = vec4(col * aO, aO); // premultiplied alpha
-}
-`;
+uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; uniform sampler2D uGrid; uniform vec2 uSize; uniform vec2 uDim; uniform float uScale; uniform vec4 uFeather; uniform vec3 uGridInfo; uniform float uHasEst; uniform float uTri; uniform float uRatioS; uniform vec2 uBand; uniform vec2 uTriVeil; uniform int uRunCount; uniform vec4 uRun[MAXRUNS]; uniform float uYT[MAXC]; uniform float uPk[MAXC]; uniform float uAl[MAXC]; uniform float uVc[MAXC]; float sm(float m) { return m * m * (3.0 - 2.0 * m); } float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); } float toSrgb(float l) { l = clamp(l, 0.0, 1.0); return l <= 0.0031308 ? 12.92 * l : 1.055 * pow(l, 1.0 / 2.4) - 0.055; } float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); } float cr(float a, float b) { return (max(a, b) + 0.05) / (min(a, b) + 0.05); } float cbrt(float x) { return x <= 0.0 ? 0.0 : pow(x, 1.0 / 3.0); } vec3 linToOk(vec3 c) { float l = cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b); float m = cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b); float s = cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b); return vec3( 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s); } vec3 okToLin(float L, float a, float b) { float l = L + 0.3963377774 * a + 0.2158037573 * b; l = l * l * l; float m = L - 0.1055613458 * a - 0.0638541728 * b; m = m * m * m; float s = L - 0.0894841775 * a - 1.2914855480 * b; s = s * s * s; return clamp(vec3( 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 0.0, 1.0); } void colorOf(int idx, out float yT, out float pk, out float al, out float vc) { yT = uYT[0]; pk = uPk[0]; al = uAl[0]; vc = uVc[0]; for (int k = 1; k < MAXC; k++) { if (k == idx) { yT = uYT[k]; pk = uPk[k]; al = uAl[k]; vc = uVc[k]; } } } float gridAt(float i, float j) { float nx = uGridInfo.x; float ny = uGridInfo.y; float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0); return texture2D(uGrid, vec2((ci + 0.5) / nx, (cj + 0.5) / ny)).r; } float veilFrac(float rx, float ry) { float g = uGridInfo.z; float fx = rx / g - 0.5; float fy = ry / g - 0.5; float ci = floor(fx); float cj = floor(fy); float tx = fx - ci; float ty = fy - cj; return (gridAt(ci, cj) * (1.0 - tx) + gridAt(ci + 1.0, cj) * tx) * (1.0 - ty) + (gridAt(ci, cj + 1.0) * (1.0 - tx) + gridAt(ci + 1.0, cj + 1.0) * tx) * ty; } float defL(float L0, float A, float B, vec3 lin0, float yT, float pk) { if (cr(yT, lum(lin0)) >= uRatioS) return L0; if (cr(yT, lum(okToLin(pk, A, B))) < uRatioS) return pk; float lo = L0; float hi = pk; for (int n = 0; n < 9; n++) { float mid = (lo + hi) * 0.5; if (cr(yT, lum(okToLin(mid, A, B))) >= uRatioS) hi = mid; else lo = mid; } return hi; } float triL(float L0, float A, float B, float Y0) { if (Y0 >= uBand.x && Y0 <= uBand.y) return L0; bool up = Y0 < uBand.x; float target = up ? uBand.x : uBand.y; float lo = up ? L0 : 0.0; float hi = up ? 1.0 : L0; for (int n = 0; n < 13; n++) { float mid = (lo + hi) * 0.5; if (lum(okToLin(mid, A, B)) < target) lo = mid; else hi = mid; } return (lo + hi) * 0.5; } void main() { vec2 px = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y); float rx = px.x / uScale; float ry = px.y / uScale; float M = 1.0; float mT = uFeather.x > 0.0 ? clamp(ry / uFeather.x, 0.0, 1.0) : 1.0; float mR = uFeather.y > 0.0 ? clamp((uDim.x - rx) / uFeather.y, 0.0, 1.0) : 1.0; float mB = uFeather.z > 0.0 ? clamp((uDim.y - ry) / uFeather.z, 0.0, 1.0) : 1.0; float mL = uFeather.w > 0.0 ? clamp(rx / uFeather.w, 0.0, 1.0) : 1.0; M = sm(min(min(mT, mR), min(mB, mL))); float known = 0.0; if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry); float wk = 0.0; int kk = -1; if (uTri < 0.5) { for (int k = 0; k < MAXRUNS; k++) { if (k >= uRunCount) break; vec4 r = uRun[k]; float dx = max(max(r.x - rx, 0.0), rx - r.z); float dy = max(max(r.y - ry, 0.0), ry - r.w); float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / 6.0, 0.0, 1.0)); if (wg > wk) { wk = wg; kk = k; } } } vec3 img = vec3(0.0); if (known > 0.0) { vec2 uv = vec2(px.x / uSize.x, px.y / uSize.y); vec4 e = texture2D(uEst, uv); vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b)); if (uHasBlur > 0.5) { vec4 eb = texture2D(uEstBlur, uv); vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b)); lin0 = lin0 + M * (blin - lin0); } if (uRatioS <= 1.05) { img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b)); } else { vec3 ok = linToOk(lin0); float Lt; if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0)); else { float yT; float pk; float al; float vc; colorOf(0, yT, pk, al, vc); Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk); if (kk >= 0) { colorOf(kk + 1, yT, pk, al, vc); Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt); } } vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z); img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b)); } } float pAl; float pVc; if (uTri > 0.5) { pAl = uTriVeil.x; pVc = uTriVeil.y; } else { float yT2; float pk2; colorOf(wk > 0.5 ? kk + 1 : 0, yT2, pk2, pAl, pVc); } float wV = (1.0 - known) * pAl * M; float aO = known + wV; if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; } vec3 col = (known * img + wV * vec3(pVc)) / aO; gl_FragColor = vec4(col * aO, aO); }`;
+/* glsl-minifier-end */
 
 	function fragment(maxRuns) {
 		return FRAGMENT.replace('__MAXRUNS__', String(maxRuns)).replace('__MAXC__', String(maxRuns + 1));
@@ -1853,14 +1861,27 @@ void main() {
 
 	function clear(rec) {
 		rec.cv.getContext('2d').clearRect(0, 0, rec.cv.width, rec.cv.height);
+		rec.cv.style.backdropFilter = '';
+		rec.cv.style.webkitBackdropFilter = '';
 		rec.ready = false;
 	}
 
-	function draw(rec, w, h, result) {
+	function draw(rec, w, h, result, blurPx = 0) {
 		if (rec.cv.width !== w || rec.cv.height !== h) { rec.cv.width = w; rec.cv.height = h; }
 		const ctx = rec.cv.getContext('2d');
 		if (result.source instanceof ImageData) ctx.putImageData(result.source, 0, 0);
 		else { ctx.clearRect(0, 0, w, h); ctx.drawImage(result.source, 0, 0, w, h); }
+		
+		// Fallback CSS blur for unknown areas or veil coverage
+		if (blurPx > 0) {
+			const b = `blur(${blurPx}px)`;
+			rec.cv.style.backdropFilter = b;
+			rec.cv.style.webkitBackdropFilter = b;
+		} else {
+			rec.cv.style.backdropFilter = '';
+			rec.cv.style.webkitBackdropFilter = '';
+		}
+		
 		rec.ready = true;
 	}
 

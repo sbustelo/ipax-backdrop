@@ -13,6 +13,8 @@
  *   ratio(yA, yB)                    WCAG contrast ratio of two relative luminances.
  *   parseContrast(raw)               CSS value -> {ok, ratio} | {ok:false, reason}
  *   solveRatio(ratio)                ratio the solver aims for (see SAFETY)
+ *   isBypass(ratio)                  true when ratio <= 1: every colour pair already meets it, so the
+ *                                    kernels skip the solve and the veil (blur-only mode)
  *   prepareColor(rgb255, solveR)     per text colour: {yT, pkL, pkR, al, vc}
  *   band(ratio)                      tricontrast luminance band {lo, hi, ok}
  *   bandVeil(band)                   translucent grey veil that lands in the band {al, vc}
@@ -36,6 +38,8 @@
 
 	const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 	const solveRatio = (r) => r * SAFETY;
+	/** WCAG ratios are never below 1, so ratio <= 1 asks for nothing. */
+	const isBypass = (r) => r <= 1;
 
 	function parseContrast(raw) {
 		const s = (raw || '').trim();
@@ -83,5 +87,5 @@
 		return { al: Math.min(1, al + 0.004), vc: C.clamp01(vlo / al) * 255 };
 	}
 
-	window.j0.register('ipax-backdrop:contrast', { MAX_WCAG_RATIO, ratio, parseContrast, solveRatio, prepareColor, band, bandVeil });
+	window.j0.register('ipax-backdrop:contrast', { MAX_WCAG_RATIO, ratio, parseContrast, solveRatio, isBypass, prepareColor, band, bandVeil });
 })();

@@ -1,38 +1,65 @@
 
-/* ipax-backdrop example page. Layout and test fixtures only: the effect itself
-   is the three --ipax-backdrop-* declarations marked below. */
+/* ipax-backdrop example page. */
+
+
+/* Main tokens */
 
 :root {
 	--ex-bg: #f0f0f0;
 	--ex-fg: #15171c;
 	--ex-mut: #566070;
 	--ex-line: #d3d7df;
-	--ex-acc: #1f4fd1;
-	--ex-blur: 4px;
+	--ex-link: #1f4fd1;
+	--ex-ok: rgb(29, 189, 29);
+	--ex-blur: 16px;
 	box-sizing: border-box;
 	padding-top: env(safe-area-inset-top, 0px);
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 
-/* ===== THE EFFECT: three declarations, nothing else ===== */
-.example-title, .example-hero-block{
-	--ipax-backdrop-contrast: 3; /* WCAG ratio, up to 15 */
-	--ipax-backdrop-mode: default; /* default | tricontrast */
+/* ===== THE EFFECT: four declarations that are handled by the JS engine ===== */
+.ex-glass {
+	--ipax-backdrop-contrast: 4.5; /* WCAG ratio, up to 15. Default: 4.5 */
+	--ipax-backdrop-feather: 14; /* soft edge, from the element border inward, in px. Default: 0 */
+	--ipax-backdrop-blur: var(--ex-blur); /* optional. default: 0 */
+	--ipax-backdrop-mode: default; /* optional. values: default | tricontrast */
 }
+
 .example-title{
---ipax-backdrop-feather-bottom: 64; /* the backdrop fades from the bottom. Units are always px */
+	--ipax-backdrop-contrast: 3;
+	--ipax-backdrop-blur: 16;
+	--ipax-backdrop-feather-bottom: 128; /* the backdrop fades from the bottom. Units are always px */
 }
 .example-hero-block{
 	--ipax-backdrop-contrast: 4.5; /* override the value declared before */
+	/* --ipax-backdrop-feather-top: 32; */
+	--ipax-backdrop-blur: 0;
+	padding:16px 32px 32px;
 }
 
-.ex-glass {
-	--ipax-backdrop-contrast: 4.5; /* WCAG ratio, up to 15 */
-	--ipax-backdrop-feather: 14; /* soft edge, from the element border inward, in px */
-	--ipax-backdrop-mode: default; /* default | tricontrast */
+/* 
+--ipax-backdrop-feather can be expanded as TRBL shorthand or individual properties:
 
-}
+1 value:  all four edges
+--ipax-backdrop-feather: 14px;
+
+2 values: top/bottom | right/left
+--ipax-backdrop-feather: 10px 20px;
+
+3 values: top | right/left | bottom
+--ipax-backdrop-feather: 10px 20px 30px;
+
+4 values: top | right | bottom | left
+--ipax-backdrop-feather: 10px 20px 30px 40px;
+
+Shorthand + Longhand directional override:
+--ipax-backdrop-feather: 14px;
+--ipax-backdrop-feather-right: 0;
+…that will result in a clean cut on the right, soft on all other edges.
+ */
+
+
 
 
 
@@ -42,7 +69,7 @@
 		--ex-fg: #e9ebf0;
 		--ex-mut: #9aa3b2;
 		--ex-line: #2a2f38;
-		--ex-acc: #86a8ff;
+		--ex-link: #86a8ff;
 	}
 }
 :root[data-theme="dark"] {
@@ -50,7 +77,11 @@
 	--ex-fg: #e9ebf0;
 	--ex-mut: #9aa3b2;
 	--ex-line: #2a2f38;
-	--ex-acc: #86a8ff;
+	--ex-link: #86a8ff;
+}
+
+A, A:visited{
+	color:var(--ex-link);
 }
 
 html {
@@ -61,7 +92,7 @@ body {
 	background: var(--ex-bg);
 	color: var(--ex-fg);
 	font:
-		12pt/1.5 system-ui,
+		12pt/1.75 system-ui,
 		-apple-system,
 		"Segoe UI",
 		sans-serif;
@@ -75,6 +106,10 @@ body {
 .ex-page p {
 	margin: 8px 0;
 }
+.ex-page p.destacado{
+font-size:16pt; margin-bottom: 6pt;
+}
+
 .ex-page H2{
 	font-size:24pt;
 	margin:24pt 0 4pt;
@@ -90,14 +125,63 @@ body {
 .ex-hero {
 	position: relative;
 	height:80vh;
-	min-height: 720px;
+	min-height: 800px;
 	margin: 0 -12px;
 	
 	display: flex;
 	flex-direction: column;
 	justify-content: space-between;
-	
 }
+
+.ex-hero-header {
+	position: absolute;
+	top: 16px;
+	right: 16px;
+	z-index: 100;
+	background: rgba(0,0,0, 0.4);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
+	padding: 8px 16px;
+	border-radius: 99px;
+	color: #fff;
+}
+
+.ex-toggle-wrap {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-size: 11pt;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+/* Switch port (from ipax-forms) */
+.ex-switch {
+	appearance: none; position: relative; flex: none; margin: 0;
+	width: 44px; height: 24px;
+	background-color: var(--ex-line); 
+	/* border: 1px solid var(--ex-mut); */
+	border-radius: 99px; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+	  box-shadow: inset 0 1px 2px #00000099;
+}
+.ex-switch::before {
+	content: ""; position: absolute; top: 50%; transform: translateY(-50%);
+	left: 3px; width: 16px; height: 16px;
+	border-radius: 50%; background-color: var(--ex-bg); transition: left 0.15s, background-color 0.15s;
+	box-shadow: 0px 1px 4px black;
+}
+.ex-switch:checked { background-color: var(--ex-ok); border-color: var(--ex-ok); }
+.ex-switch:checked::before { left: 23px; background-color: #fff; }
+
+/* Fixed contrast overrides for the Hero Header (always dark) */
+.ex-hero-header .ex-switch {
+	background-color: rgba(255,255,255,0.2); 
+	border: 1px solid rgba(255,255,255,0.4);
+}
+.ex-hero-header .ex-switch::before { background-color: #fff; }
+.ex-hero-header .ex-switch:checked { background-color: var(--ex-ok); border-color: var(--ex-ok); }
+
+
 .ex-hero, .ex-photo1{
 	background-color: var(--ex-line);
 	background-size: cover;
@@ -109,23 +193,44 @@ body {
 H1.example-title {
 	margin: 0;
 	padding: 16px 32px;
-	font-size: 64pt;
+	font-size: 72pt;
 	line-height: 1.1;
 	color: #fff;
 	font-weight: normal;
 	
-	text-shadow: 0px 2px var(--ex-blur) black;
-	
+	text-shadow: 0px 2px 4px black;
 }
 
-.example-hero-block{
-	padding:32px;
-	backdrop-filter: blur(var(--ex-blur));
-	-webkit-backdrop-filter: blur(var(--ex-blur));
+
+
+
+
+@media only screen and (max-width: 640px) {
+	.ex-hero{ background-position: center; }
+	H1.example-title{ font-size: 64pt; }
 }
 
+@media only screen and (min-width: 641px) {
+	.ex-hero{ background-position: center -20px; }
+}
+
+/* Extra large devices (large laptops and desktops, 1200px and up) */
+@media only screen and (min-width: 768px) {
+	.ex-hero{ background-position: center -60px; }
+}
+
+
+
+
+
+
+
+
+
+
+
 .example-hero-block{
-	font-size:18pt;
+	font-size:21pt;
 	color:#fff;
 }
 
@@ -138,8 +243,17 @@ H1.example-title {
 
 /* ===== Stage and draggable boxes ===== */
 .ex-stage {
-	position: relative;
-	height: 440px;
+	position: sticky;
+	top: -16px;
+	z-index: 50;
+	box-shadow: 0 2px 8px #000000cc;
+
+	min-height: 380px;
+	height:50vh;
+	/* min-height: 340px; */
+
+	margin:10pt 0;
+
 	overflow: hidden;
 	border-radius: 6px;
 	background-color: var(--ex-line);
@@ -154,7 +268,19 @@ H1.example-title {
 	user-select: none;
 	-webkit-user-select: none;
 	cursor: move;
+	overflow: hidden;
 }
+
+.ex-box SMALL{
+	font-weight: normal;
+	display: block;
+	font-size: 10pt;
+	line-height: 12pt;
+	opacity: .7;
+}
+
+
+
 .ex-picture {
 	background-size: cover;
 	background-position: center;
@@ -178,6 +304,25 @@ H1.example-title {
 	font-weight: 700;
 	font-size: 14pt;
 }
+
+.ex-stage-label, .ex-pic-label{
+	font-size:9pt; text-transform: uppercase; letter-spacing: .2em;
+}
+
+.ex-stage-label {
+	position: absolute;
+	top: 12px; left: 12px;
+	font-size: 10pt; font-weight: bold;
+	color: rgba(255, 255, 255, 0.75);
+	text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+	pointer-events: none; z-index: 10;
+}
+
+.ex-pic-label {
+	color: rgba(255, 255, 255, 0.75);
+	text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+
 .ex-glass {
 	position: absolute;
 	inset: 0;
@@ -191,11 +336,10 @@ H1.example-title {
 	font-size: 14pt;
 	line-height: 1.15;
 	color: #fff;
-	backdrop-filter: blur(var(--ex-blur));
-	-webkit-backdrop-filter: blur(var(--ex-blur));
 }
-.ex-yellow {
-	color: #ffd54a;
+
+.ex-custom-text {
+	color: var(--ex-custom-color, #ffd54a);
 }
 .ex-k {
 	color: #000;
@@ -244,10 +388,11 @@ H1.example-title {
 	align-items: center;
 	padding: 6px 0;
 	border-bottom: 1px solid var(--ex-line);
+	line-height: .5;
 }
 .ex-row input[type="range"] {
 	width: 130px;
-	accent-color: var(--ex-acc);
+	accent-color: var(--ex-link);
 }
 .ex-row select {
 	font: inherit;
@@ -274,23 +419,31 @@ H1.example-title {
 
 /* Directional feather disclosure layout */
 .ex-disclosure {
-	margin: 6px 0 12px 0;
-	font-size: 0.9em;
+	margin: 0;
+	border-bottom: 1px solid var(--ex-line);
 }
 
-.ex-disclosure summary {
+.ex-summary {
 	cursor: pointer;
 	user-select: none;
+}
+
+.ex-summary:hover span {
 	opacity: 0.85;
-	padding: 4px 0;
 }
 
-.ex-disclosure summary:hover {
-	opacity: 1;
+.ex-summary .ex-row {
+	display: inline-grid;
+	width: calc(100% - 24px);
+	vertical-align: middle;
+	border-bottom: none;
 }
 
-.ex-disclosure[open] summary {
-	margin-bottom: 8px;
+.ex-hint {
+	opacity: 0.6;
+	font-weight: normal;
+	font-size: 0.85em;
+	margin-left: 6px;
 }
 
 .ex-disclosure-body {
@@ -299,4 +452,5 @@ H1.example-title {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
+	margin-bottom: 12px;
 }

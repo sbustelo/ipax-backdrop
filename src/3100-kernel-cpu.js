@@ -32,12 +32,6 @@
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
-
-
-
-
-
-
 	function veilFrac(grid, rx, ry) {
 		const V = grid.V, nx = grid.nx, ny = grid.ny, g = grid.g;
 		const gv = (i, j) => V[Math.min(ny - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
@@ -48,17 +42,22 @@
 	function render(input) {
 		const C = svc('color'), K = svc('contrast');
 		const LUT = C.LUT, clamp01 = C.clamp01, smooth = C.smooth, lum = C.luminance, toSrgb = C.toSrgb255, cr = K.ratio;
-		const { est, grid, w, h, s, W, H, params, colors } = input;
+		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
 
-		let pix = null, tainted = false;
-		if (est) { try { pix = est.getContext('2d').getImageData(0, 0, w, h).data; } catch (e) { tainted = true; } }
+		let pix = null, blurPix = null, tainted = false;
+		if (est) { 
+			try { 
+				pix = est.getContext('2d').getImageData(0, 0, w, h).data; 
+				if (estBlur) blurPix = estBlur.getContext('2d').getImageData(0, 0, w, h).data;
+			} catch (e) { tainted = true; } 
+		}
 
 		const out = new Uint8ClampedArray(w * h * 4);
 		const tri = params.mode === 'tricontrast', ratio = params.ratio, rS = K.solveRatio(ratio);
 		const fParam = params.feather;
-		const f = (typeof fParam === 'number')
-			? { top: fParam, right: fParam, bottom: fParam, left: fParam }
-			: (fParam || { top: 0, right: 0, bottom: 0, left: 0 });
+		const f = (typeof fParam === 'object' && fParam !== null)
+			? fParam
+			: (typeof fParam === 'number' ? { top: fParam, right: fParam, bottom: fParam, left: fParam } : { top: 0, right: 0, bottom: 0, left: 0 });
 		const fT = f.top > 0 ? f.top : 0, fR = f.right > 0 ? f.right : 0, fB = f.bottom > 0 ? f.bottom : 0, fL = f.left > 0 ? f.left : 0;
 		const hasFeather = fT > 0 || fR > 0 || fB > 0 || fL > 0;
 
@@ -123,23 +122,35 @@
 
 				let ir = 0, ig = 0, ib = 0;
 				if (known > 0) {
-					const fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
-					C.linToOklab(fr, fg, fb, ok);
-					const L0 = ok[0], A = ok[1], B = ok[2];
-					let Lt;
-					if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
-					else {
-						Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
-						if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+					let fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
+					
+					if (blurPix) {
+						const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
+						fr = fr + M * (br - fr);
+						fg = fg + M * (bg - fg);
+						fb = fb + M * (bb - fb);
 					}
-					C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
-					ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
-					if (M >= 0.999 && known >= 0.999) {
-						const Y = lum(lin[0], lin[1], lin[2]);
-						const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
-						if (v < minV) minV = v;
-						if (v < ratio - 1e-6) under++;
-						nI++;
+					
+					if (K.isBypass(ratio)) {
+						ir = toSrgb(fr); ig = toSrgb(fg); ib = toSrgb(fb);
+					} else {
+						C.linToOklab(fr, fg, fb, ok);
+						const L0 = ok[0], A = ok[1], B = ok[2];
+						let Lt;
+						if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
+						else {
+							Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
+							if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+						}
+						C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
+						ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
+						if (M >= 0.999 && known >= 0.999) {
+							const Y = lum(lin[0], lin[1], lin[2]);
+							const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
+							if (v < minV) minV = v;
+							if (v < ratio - 1e-6) under++;
+							nI++;
+						}
 					}
 				} else if (M >= 0.999) nV++;
 

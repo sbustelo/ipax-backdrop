@@ -105,14 +105,27 @@
 
 	function clear(rec) {
 		rec.cv.getContext('2d').clearRect(0, 0, rec.cv.width, rec.cv.height);
+		rec.cv.style.backdropFilter = '';
+		rec.cv.style.webkitBackdropFilter = '';
 		rec.ready = false;
 	}
 
-	function draw(rec, w, h, result) {
+	function draw(rec, w, h, result, blurPx = 0) {
 		if (rec.cv.width !== w || rec.cv.height !== h) { rec.cv.width = w; rec.cv.height = h; }
 		const ctx = rec.cv.getContext('2d');
 		if (result.source instanceof ImageData) ctx.putImageData(result.source, 0, 0);
 		else { ctx.clearRect(0, 0, w, h); ctx.drawImage(result.source, 0, 0, w, h); }
+		
+		// Fallback CSS blur for unknown areas or veil coverage
+		if (blurPx > 0) {
+			const b = `blur(${blurPx}px)`;
+			rec.cv.style.backdropFilter = b;
+			rec.cv.style.webkitBackdropFilter = b;
+		} else {
+			rec.cv.style.backdropFilter = '';
+			rec.cv.style.webkitBackdropFilter = '';
+		}
+		
 		rec.ready = true;
 	}
 

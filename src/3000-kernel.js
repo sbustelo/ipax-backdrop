@@ -13,11 +13,14 @@
  *   render(input) -> {source, stats, tainted}
  *   input = {
  *     est      HTMLCanvasElement  estimated backdrop (w x h), from the resolver
+ *     estBlur  HTMLCanvasElement | null   the same estimate blurred (2300). Mixed with `est` by the
+ *                                 feather mask before the lightness solve; null = no blur
  *     grid     {V, nx, ny, g}     unknown cells, from the resolver
  *     w, h     working size in px
  *     s        working px per CSS px
  *     W, H     element size in CSS px
- *     params   {ratio, mode, feather}     from the reader
+ *     params   {ratio, mode, feather, blur}   from the reader. ratio <= 1 (contrast.isBypass) skips the
+ *                                 solve and the veil: the output is just the (blurred) estimate
  *     colors   {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}   from reader-text
  *   }
  *   source   ImageData (CPU) or HTMLCanvasElement (WebGL), w x h. Pixels are

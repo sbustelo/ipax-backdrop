@@ -31,12 +31,15 @@
 		'void main() { gl_Position = vec4(aPos, 0.0, 1.0); }'
 	].join('\n');
 
-	const FRAGMENT = `
+/* glsl-minifier-start */
+const FRAGMENT = `
 precision highp float;
 #define MAXRUNS __MAXRUNS__
 #define MAXC __MAXC__
 
 uniform sampler2D uEst;     // estimated backdrop (RGBA8, row 0 = top)
+uniform sampler2D uEstBlur; // blurred estimated backdrop (RGBA8)
+uniform float uHasBlur;     // 1.0 if uEstBlur is bound and active
 uniform sampler2D uGrid;    // unknown cells (LUMINANCE, 1.0 = unknown)
 uniform vec2  uSize;        // working size in px
 uniform vec2  uDim;         // element size in CSS px
@@ -163,22 +166,34 @@ void main() {
 
   vec3 img = vec3(0.0);
   if (known > 0.0) {
-    vec4 e = texture2D(uEst, vec2(px.x / uSize.x, px.y / uSize.y));
+    vec2 uv = vec2(px.x / uSize.x, px.y / uSize.y);
+    vec4 e = texture2D(uEst, uv);
     vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b));
-    vec3 ok = linToOk(lin0);
-    float Lt;
-    if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0));
-    else {
-      float yT; float pk; float al; float vc;
-      colorOf(0, yT, pk, al, vc);
-      Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk);
-      if (kk >= 0) {
-        colorOf(kk + 1, yT, pk, al, vc);
-        Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt);
-      }
+    
+    if (uHasBlur > 0.5) {
+      vec4 eb = texture2D(uEstBlur, uv);
+      vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b));
+      lin0 = lin0 + M * (blin - lin0);
     }
-    vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z);
-    img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b));
+    
+    if (uRatioS <= 1.05) {
+      img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b));
+    } else {
+      vec3 ok = linToOk(lin0);
+      float Lt;
+      if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0));
+      else {
+        float yT; float pk; float al; float vc;
+        colorOf(0, yT, pk, al, vc);
+        Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk);
+        if (kk >= 0) {
+          colorOf(kk + 1, yT, pk, al, vc);
+          Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt);
+        }
+      }
+      vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z);
+      img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b));
+    }
   }
 
   float pAl; float pVc;
@@ -192,6 +207,7 @@ void main() {
   gl_FragColor = vec4(col * aO, aO); // premultiplied alpha
 }
 `;
+/* glsl-minifier-end */
 
 	function fragment(maxRuns) {
 		return FRAGMENT.replace('__MAXRUNS__', String(maxRuns)).replace('__MAXC__', String(maxRuns + 1));

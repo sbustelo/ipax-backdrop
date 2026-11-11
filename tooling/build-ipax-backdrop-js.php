@@ -225,8 +225,11 @@ $buffer = preg_replace_callback('/\/\* glsl-minifier-start \*\/(.*?)\/\* glsl-mi
             $line = trim(preg_replace('/\s+/', ' ', $line)); // colapsar múltiples espacios
             if ($line === '') continue;
             
-            // Las macros de WebGL (#define, #ifdef) REQUIEREN un salto de línea al final
+            // Las macros de WebGL (#) REQUIEREN estar al inicio de una línea y un salto al final
             if ($line[0] === '#') {
+                if ($minified !== '' && substr($minified, -1) !== "\n") {
+                    $minified = rtrim($minified) . "\n";
+                }
                 $minified .= $line . "\n";
             } else {
                 $minified .= $line . " ";

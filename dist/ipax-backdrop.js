@@ -66,7 +66,7 @@
 ;
 
 /* --- lib/j0-kernel/02-core-j0kernel.js --- */
-/* j0 framework kernel 0.4.01 • 11/nov/2026
+/* j0 framework kernel 0.4.01 (sans manifest, logger, i18n, M helper) • 11/nov/2026
  * Santiago Bustelo, https://bustelo.com.ar/ 
  * Apache License, Version 2.0 */
 
@@ -82,6 +82,16 @@
 	window.j0.bus.schema = window.j0.bus.schema || {};
 
 	window.j0.registry = window.j0.registry || new Map();
+
+	/* 
+	// [IPAX-BACKDROP EXCLUSIONS]
+	// The following features belong to the full j0 UI framework and are 
+	// safely commented out here to reduce the standalone ipax-backdrop footprint:
+	// - manifest
+	// - logger (with its 3-second timeout)
+	// - i18n (dictionary and DOM updater)
+	// - helpers (M translation function)
+
 	window.j0.manifest = window.j0.manifest || { bases: {}, tpl_bases: {} };
 
     window.j0.logger = window.j0.logger || {
@@ -89,7 +99,7 @@
         _isBroken: false,
         _flushNative: function() {
             this._bootQueue.forEach(item => {
-                const out = `[J0:PRE-BOOT] [${item.type}] ${item.msg}`;
+                const out = \`[J0:PRE-BOOT] [\${item.type}] \${item.msg}\`;
                 if (item.type === 'ERROR') console.error(out, item.data || '');
                 else if (item.type === 'WARN') console.warn(out, item.data || '');
                 else console.log(out, item.data || '');
@@ -98,11 +108,11 @@
             this._isBroken = true;
         },
         log: function(msg, data) { 
-            if (this._isBroken) console.log(`[J0:PRE-BOOT] [INFO] ${msg}`, data || '');
+            if (this._isBroken) console.log(\`[J0:PRE-BOOT] [INFO] \${msg}\`, data || '');
             else this._bootQueue.push({ type: 'INFO', msg, data }); 
         },
         warn: function(msg, data) { 
-            if (this._isBroken) console.warn(`[J0:PRE-BOOT] [WARN] ${msg}`, data || '');
+            if (this._isBroken) console.warn(\`[J0:PRE-BOOT] [WARN] \${msg}\`, data || '');
             else this._bootQueue.push({ type: 'WARN', msg, data }); 
         },
         error: function(msg, data) { 
@@ -127,7 +137,7 @@
 			return text
 				.replace(/<[^>]*>/g, '')
 				.normalize("NFD")
-				.replace(/[\u0300-\u036f]/g, "")
+				.replace(/[\\u0300-\\u036f]/g, "")
 				.toLowerCase()
 				.replace(/[^a-z0-9]/g, "")
 				.substring(0, 40);
@@ -136,7 +146,7 @@
 			if (!this.dicts[lang]) this.dicts[lang] = {};
 			for (const [key, value] of Object.entries(translations)) {
 				if (window.j0.env === 'local' && this.dicts[lang][key] && this.dicts[lang][key] !== value) {
-					if (window.j0.logger) window.j0.logger.warn(`[i18n:Collision] La llave '${key}' ('${this.dicts[lang][key]}') fue pisada por '${value}'.`);
+					if (window.j0.logger) window.j0.logger.warn(\`[i18n:Collision] La llave '\${key}' ('\${this.dicts[lang][key]}') fue pisada por '\${value}'.\`);
 				}
 				this.dicts[lang][key] = value;
 			}
@@ -208,8 +218,9 @@
             return resolvedValue;
         }
 
-        return `<span class="j0ui-text-spinner" data-j0-i18n-key="${key}" aria-busy="true" aria-label="Loading..."><del aria-hidden="true" style="visibility:hidden;pointer-events:none;">${text}</del></span>`;
+        return \`<span class="j0ui-text-spinner" data-j0-i18n-key="\${key}" aria-busy="true" aria-label="Loading..."><del aria-hidden="true" style="visibility:hidden;pointer-events:none;">\${text}</del></span>\`;
 	};
+	*/
 
 	window.j0.register = (name, instance) => {
 		window.j0.registry.set(name, instance);

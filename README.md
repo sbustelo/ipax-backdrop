@@ -10,7 +10,6 @@ A vanilla JavaScript & WebGL backdrop-filter to get accessible frosted glass.
   --ipax-backdrop-feather: 14px;     /* optional. Default: 0 */
   --ipax-backdrop-blur: 6px;         /* integrated gradual blur */
   --ipax-backdrop-mode: default;     /* or tricontrast */
-  backdrop-filter: blur(6px);        /* standard CSS blur acts as a fallback for unknown background areas */
 }
 ```
 

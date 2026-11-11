@@ -8,7 +8,6 @@ ipax-backdrop is configured with CSS custom properties. The library reads them w
   --ipax-backdrop-feather: 14px;
   --ipax-backdrop-blur: 6px;           /* integrated gradual blur */
   --ipax-backdrop-mode: default;
-  backdrop-filter: blur(6px);        /* standard CSS blur acts as a fallback for unknown background areas */
 }
 ```
 

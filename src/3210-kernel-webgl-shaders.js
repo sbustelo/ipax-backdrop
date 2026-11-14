@@ -13,6 +13,10 @@
  * computed on the CPU by 0110-util-contrast.js and passed as uniforms, so the
  * contrast maths has a single source of truth.
  *
+ * v0.1.05: textures may be larger than the working size (uTexSize, uGridTex), so the
+ * backend can reuse them with texSubImage2D. The unknown grid is uploaded as raw 0/1 bytes.
+ * Bypass uses the same test as the CPU kernel (uBypass) instead of a 1.05 threshold.
+ *
  * Service 'ipax-backdrop:webgl-shaders': {vertex, fragment(maxRuns)}
  */
 (function () {
@@ -42,6 +46,8 @@ uniform sampler2D uEstBlur; // blurred estimated backdrop (RGBA8)
 uniform float uHasBlur;     // 1.0 if uEstBlur is bound and active
 uniform sampler2D uGrid;    // unknown cells (LUMINANCE, 1.0 = unknown)
 uniform vec2  uSize;        // working size in px
+uniform vec2  uTexSize;     // allocated size of uEst / uEstBlur (>= uSize; the textures only grow)
+uniform vec2  uGridTex;     // allocated size of uGrid (>= nx, ny)
 uniform vec2  uDim;         // element size in CSS px
 uniform float uScale;       // working px per CSS px
 uniform vec4  uFeather;     // CSS px: top, right, bottom, left
@@ -49,6 +55,7 @@ uniform vec3  uGridInfo;    // nx, ny, cell size (CSS px)
 uniform float uHasEst;      // 0.0 when the estimate could not be uploaded
 uniform float uTri;         // 1.0 = tricontrast
 uniform float uRatioS;      // ratio the solver aims for (with safety margin)
+uniform float uBypass;      // 1.0 = ratio <= 1: no solve, no veil (same test as contrast.isBypass)
 uniform vec2  uBand;        // tricontrast band: lo, hi (luminance)
 uniform vec2  uTriVeil;     // tricontrast veil: alpha, level 0..1
 uniform int   uRunCount;
@@ -95,7 +102,7 @@ void colorOf(int idx, out float yT, out float pk, out float al, out float vc) {
 float gridAt(float i, float j) {
   float nx = uGridInfo.x; float ny = uGridInfo.y;
   float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0);
-  return texture2D(uGrid, vec2((ci + 0.5) / nx, (cj + 0.5) / ny)).r;
+  return min(texture2D(uGrid, vec2((ci + 0.5) / uGridTex.x, (cj + 0.5) / uGridTex.y)).r * 255.0, 1.0); // V is uploaded as 0/1 bytes
 }
 
 float veilFrac(float rx, float ry) {
@@ -166,7 +173,7 @@ void main() {
 
   vec3 img = vec3(0.0);
   if (known > 0.0) {
-    vec2 uv = vec2(px.x / uSize.x, px.y / uSize.y);
+    vec2 uv = px / uTexSize;
     vec4 e = texture2D(uEst, uv);
     vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b));
     
@@ -176,7 +183,7 @@ void main() {
       lin0 = lin0 + M * (blin - lin0);
     }
     
-    if (uRatioS <= 1.05) {
+    if (uBypass > 0.5) {
       img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b));
     } else {
       vec3 ok = linToOk(lin0);
@@ -200,7 +207,7 @@ void main() {
   if (uTri > 0.5) { pAl = uTriVeil.x; pVc = uTriVeil.y; }
   else { float yT2; float pk2; colorOf(wk > 0.5 ? kk + 1 : 0, yT2, pk2, pAl, pVc); }
 
-  float wV = (1.0 - known) * pAl * M;
+  float wV = uBypass > 0.5 ? 0.0 : (1.0 - known) * pAl * M;
   float aO = known + wV;
   if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; }
   vec3 col = (known * img + wV * vec3(pVc)) / aO;

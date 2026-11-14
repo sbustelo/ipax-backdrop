@@ -17,20 +17,33 @@
  *     s      working scale (working px per client px)
  *     w, h   working canvas size in px
  *     cell   probe cell size in client px
- *   est    HTMLCanvasElement w x h, the estimated backdrop (opaque)
+ *   est    HTMLCanvasElement w x h, the estimated backdrop (opaque).
+ *          REUSED: stored in rec.est and overwritten by the next resolve() of
+ *          the same record. Callers must consume it synchronously (the pipeline
+ *          does). compositor.release(rec) drops it.
  *   grid   {V, nx, ny, g}: V[j*nx+i] = 1 for cells that are unknown. V is
  *          already dilated by one cell so a mixed boundary falls on the
  *          unknown side (never trusts a half-known cell).
  *   why    Set of reasons found for unknown areas
- *   stats  {cells, unknown, tainted, baseReal, ms}
+ *   stats  {cells, probes, unknown, tainted, baseReal, probeMs, ms}
+ *          probeMs = probing + painting (the part that does not depend on the kernel)
+ *
+ * ADAPTIVE PROBING (v0.1.05, config.probeBlock, default 4, 1 = probe every cell)
+ *   The cell grid is split into blocks of B x B cells. The four corners and the
+ *   centre of each block are probed; when all five see the same layer stack the
+ *   block is filled without further probing, otherwise every cell is probed as
+ *   before. On uniform backgrounds this removes about 85% of the elementsFromPoint
+ *   calls (B = 4). Cost: a feature smaller than a block (B * cell = 48 px by
+ *   default) that touches none of the five samples can be missed. Set
+ *   config.probeBlock = 1 for the exact previous behaviour.
  *
  * Opaque cut: layers below the first fully opaque known layer are invisible
  * and are ignored, together with anything unknown below them.
  *
- * Known limits: elementsFromPoint is a point sample (default every 12 px);
- * elements with pointer-events:none are not listed by the browser, so they
- * are invisible to the resolver (other managed layers are handled through the
- * compositor registry instead).
+ * Known limits: elementsFromPoint is a point sample; elements with
+ * pointer-events:none are not listed by the browser, so they are invisible to
+ * the resolver (other managed layers are handled through the compositor
+ * registry instead).
  */
 (function () {
 	'use strict';
@@ -39,8 +52,8 @@
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const covers = (L, x, y) => {
-		if (L.k === 'col') return true;
-		if (L.k === 'lay') return x >= L.r.left && x <= L.r.right && y >= L.r.top && y <= L.r.bottom;
+		if (L.r && (x < L.r.left || x > L.r.right || y < L.r.top || y > L.r.bottom)) return false;
+		if (L.k === 'col' || L.k === 'lay') return true;
 		const g = L.g;
 		if (!g.rx && (x < g.x || x > g.x + g.dw)) return false;
 		if (!g.ry && (y < g.y || y > g.y + g.dh)) return false;
@@ -67,14 +80,27 @@
 		ctx.restore();
 	}
 
+	function sameRuns(a, b) {
+		if (a.length !== b.length) return false;
+		for (let k = 0; k < a.length; k++) {
+			if (a[k].i0 !== b[k].i0 || a[k].i1 !== b[k].i1 || a[k].sig !== b[k].sig) return false;
+		}
+		return true;
+	}
+
 	function resolve(rec, R, s, w, h, g) {
 		const t0 = performance.now();
 		const Layers = svc('layers'), Color = svc('color'), Comp = svc('compositor');
 		const layerTag = svc('names').layerTag.toUpperCase();
+		const cfg = svc('config');
 
-		const est = document.createElement('canvas');
-		est.width = w; est.height = h;
-		const ec = est.getContext('2d');
+		// Reuse the estimate canvas of this record. Assigning width/height reallocates the backing
+		// store and resets the context, so it is only done when the size really changed.
+		let est = rec && rec.est;
+		if (!est) { est = document.createElement('canvas'); if (rec) rec.est = est; }
+		if (est.width !== w || est.height !== h) { est.width = w; est.height = h; }
+		const ec = est.getContext('2d', { willReadFrequently: true });
+		ec.setTransform(1, 0, 0, 1, 0, 0); // a reused context still carries the previous transform
 
 		// Page background: body, else html, else assume white.
 		let base = [255, 255, 255, 1], baseReal = false;
@@ -87,59 +113,113 @@
 		ec.fillStyle = '#fff'; ec.fillRect(0, 0, w, h);
 		ec.fillStyle = 'rgba(' + base[0] + ',' + base[1] + ',' + base[2] + ',' + base[3] + ')';
 		ec.fillRect(0, 0, w, h);
-		ec.setTransform(s, 0, 0, s, -R.left * s, -R.top * s); // from here on, draw in client coordinates
 
-		const nx = Math.ceil(R.width / g), ny = Math.ceil(R.height / g);
-		const V = new Uint8Array(nx * ny), cache = new Map(), why = new Set(), taint = new Set();
+		if (s === 1) {
+			ec.setTransform(1, 0, 0, 1, -Math.round(R.left), -Math.round(R.top));
+		} else {
+			ec.setTransform(s, 0, 0, s, -R.left * s, -R.top * s); // from here on, draw in client coordinates
+		}
+
+		const nx = Math.ceil(R.width / g), ny = Math.ceil(R.height / g), N = nx * ny;
+		const V = new Uint8Array(N), done = new Uint8Array(N), sigs = new Array(N), stacks = new Array(N);
+		const cache = new Map(), why = new Set(), taint = new Set();
+		const B = Math.max(1, Math.min(8, Math.floor(cfg.probeBlock === undefined ? 4 : cfg.probeBlock) || 1));
+		let probes = 0;
+
+		// Probe one cell: layer stack, "unknown" flag and a signature (ids of the stacked layers).
+		const probe = (i, j) => {
+			const k = j * nx + i;
+			if (done[k]) return;
+			probes++;
+			const px = Math.min(R.left + (i + 0.5) * g, R.right - 0.01), py = Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01);
+			const list = document.elementsFromPoint(px, py), idx = list.indexOf(rec.layer);
+
+			const stack = [];
+			let sig = '', unk = false, cut = false;
+			if (idx < 0) { unk = true; why.add('out of view'); }
+			else {
+				for (let m = idx + 1; m < list.length && !cut; m++) {
+					const e = list[m];
+					if (e === document.documentElement || e === document.body || e.tagName === layerTag || (e.parentElement && e.parentElement.tagName === layerTag)) continue;
+					let Ls = cache.get(e);
+					if (!Ls) { Ls = Layers.layersOf(e, rec); cache.set(e, Ls); }
+					for (const L of Ls) {
+						if (L.k === 'unk') { unk = true; why.add(L.why); continue; }
+						if (!covers(L, px, py)) continue;
+						stack.push(L);
+						sig += L.id + ',';
+						if (L.tainted) taint.add(L.id);
+						if (L.a >= 0.999 && !L.nocut) { cut = true; break; }
+					}
+				}
+			}
+			if (unk) sig += 'u';
+			V[k] = unk ? 1 : 0; sigs[k] = sig; stacks[k] = stack; done[k] = 1;
+		};
+
+		const fill = (i0, j0, i1, j1, k0) => {
+			for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+				const k = j * nx + i;
+				if (done[k]) continue;
+				sigs[k] = sigs[k0]; stacks[k] = stacks[k0]; V[k] = V[k0]; done[k] = 1;
+			}
+		};
 
 		Comp.withHitTesting(rec, () => {
-			for (let j = 0; j < ny; j++) {
-				let runSig = null, runStart = 0, runStack = null;
-				// Neighbouring cells with the same layer stack are painted as one rectangle.
-				// The rectangle edges are snapped to whole canvas pixels: a clip on a fractional edge is
-				// antialiased, and two such clips side by side leave a seam that lets the base colour show
-				// through (visible as light horizontal lines over a big photo). The last row and column
-				// extend to the canvas edge.
-				const flush = (iEnd) => {
-					if (runSig === null) return;
-					const x0 = Math.round(runStart * g * s), x1 = iEnd >= nx ? w : Math.round(iEnd * g * s);
-					const y0 = Math.round(j * g * s), y1 = j + 1 >= ny ? h : Math.round((j + 1) * g * s);
-					if (x1 <= x0 || y1 <= y0) return;
-					const C = { x: R.left + x0 / s, y: R.top + y0 / s, w: (x1 - x0) / s, h: (y1 - y0) / s };
-					for (let k = runStack.length - 1; k >= 0; k--) paintLayer(ec, runStack[k], C);
-				};
-				for (let i = 0; i < nx; i++) {
-					const px = Math.min(R.left + (i + 0.5) * g, R.right - 0.01), py = Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01);
-					const list = document.elementsFromPoint(px, py), idx = list.indexOf(rec.layer);
-					const stack = [];
-					let unk = false, cut = false;
-					if (idx < 0) { unk = true; why.add('out of view'); }
-					else {
-						for (let k = idx + 1; k < list.length && !cut; k++) {
-							const e = list[k];
-							if (e === document.documentElement || e === document.body || e.tagName === layerTag || (e.parentElement && e.parentElement.tagName === layerTag)) continue;
-							let Ls = cache.get(e);
-							if (!Ls) { Ls = Layers.layersOf(e, rec); cache.set(e, Ls); }
-							for (const L of Ls) {
-								if (L.k === 'unk') { unk = true; why.add(L.why); continue; }
-								if (!covers(L, px, py)) continue;
-								stack.push(L);
-								if (L.tainted) taint.add(L.id);
-								if (L.a >= 0.999 && !L.nocut) { cut = true; break; }
-							}
-						}
-					}
-					V[j * nx + i] = unk ? 1 : 0;
-					const sig = stack.map((L) => L.id).join(',') + (unk ? 'u' : '');
-					if (sig !== runSig) { flush(i); runSig = sig; runStart = i; runStack = stack; }
-				}
-				flush(nx);
+			if (B === 1) {
+				for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) probe(i, j);
+				return;
+			}
+			for (let bj = 0; bj < ny; bj += B) for (let bi = 0; bi < nx; bi += B) {
+				const ie = Math.min(bi + B, nx), je = Math.min(bj + B, ny); // cells owned by this block: [bi, ie) x [bj, je)
+				const i1 = Math.min(bi + B, nx - 1), j1 = Math.min(bj + B, ny - 1); // corners: the next block's origin, clamped
+				const cx = (bi + ie - 1) >> 1, cy = (bj + je - 1) >> 1;
+				probe(bi, bj); probe(i1, bj); probe(bi, j1); probe(i1, j1); probe(cx, cy);
+				const k0 = bj * nx + bi, s0 = sigs[k0];
+				if (sigs[bj * nx + i1] === s0 && sigs[j1 * nx + bi] === s0 && sigs[j1 * nx + i1] === s0 && sigs[cy * nx + cx] === s0) fill(bi, bj, ie, je, k0);
+				else for (let j = bj; j < je; j++) for (let i = bi; i < ie; i++) probe(i, j);
 			}
 		});
 
-		const V2 = new Uint8Array(nx * ny);
+		// Painting. Neighbouring cells with the same layer stack are painted as one rectangle, and identical
+		// consecutive rows are merged vertically (a uniform box becomes ONE rectangle instead of one per row).
+		// The rectangle edges are snapped to whole canvas pixels: a clip on a fractional edge is
+		// antialiased, and two such clips side by side leave a seam that lets the base colour show
+		// through (visible as light horizontal lines over a big photo). The last row and column
+		// extend to the canvas edge.
+		const rowRuns = (j) => {
+			const runs = [], row = j * nx;
+			let start = 0, sig = sigs[row];
+			for (let i = 1; i <= nx; i++) {
+				const cur = i < nx ? sigs[row + i] : null;
+				if (cur !== sig) { runs.push({ i0: start, i1: i, sig, stack: stacks[row + start] }); start = i; sig = cur; }
+			}
+			return runs;
+		};
+		const paintRows = (runs, jA, jB) => {
+			const y0 = Math.round(jA * g * s), y1 = jB >= ny ? h : Math.round(jB * g * s);
+			if (y1 <= y0) return;
+			for (const run of runs) {
+				const x0 = Math.round(run.i0 * g * s), x1 = run.i1 >= nx ? w : Math.round(run.i1 * g * s);
+				if (x1 <= x0) continue;
+				const C = { x: R.left + x0 / s, y: R.top + y0 / s, w: (x1 - x0) / s, h: (y1 - y0) / s };
+				for (let k = run.stack.length - 1; k >= 0; k--) paintLayer(ec, run.stack[k], C);
+			}
+		};
+		let open = null, openFrom = 0;
+		for (let j = 0; j < ny; j++) {
+			const runs = rowRuns(j);
+			if (open && sameRuns(open, runs)) continue;
+			if (open) paintRows(open, openFrom, j);
+			open = runs; openFrom = j;
+		}
+		if (open) paintRows(open, openFrom, ny);
+
+		const probeMs = performance.now() - t0;
+
+		const V2 = new Uint8Array(N);
 		let unknown = 0;
-		for (let k = 0; k < V.length; k++) unknown += V[k];
+		for (let k = 0; k < N; k++) unknown += V[k];
 		for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
 			let v = 0;
 			for (let dj = -1; dj <= 1 && !v; dj++) for (let di = -1; di <= 1; di++) {
@@ -148,7 +228,7 @@
 			}
 			V2[j * nx + i] = v;
 		}
-		return { est, grid: { V: V2, nx, ny, g }, why, stats: { cells: V.length, unknown, tainted: taint.size, baseReal, ms: performance.now() - t0 } };
+		return { est, grid: { V: V2, nx, ny, g }, why, stats: { cells: N, probes, unknown, tainted: taint.size, baseReal, probeMs, ms: performance.now() - t0 } };
 	}
 
 	window.j0.register('ipax-backdrop:resolver', { resolve });

@@ -22,7 +22,7 @@
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const api = {
-		version: '0.1.0',
+		version: '0.1.05',
 		start: () => svc('orchestrator').start(),
 		stop: () => svc('orchestrator').stop(),
 		refresh: () => svc('orchestrator').refresh(),

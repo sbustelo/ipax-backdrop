@@ -82,8 +82,22 @@
 		};
 	}
 
+	function parsePerf(s, def) {
+		if (!s) return def;
+		const v = s.toLowerCase();
+		if (v === 'infinite' || v === 'none' || v === '0' || v === '0fps') return 0;
+		const m = /^([\d.]+)(?:fps)?$/.exec(v);
+		return m ? Math.max(0, parseFloat(m[1])) : def;
+	}
+
+	function parseNum(s, def) {
+		if (!s) return def;
+		const v = parseFloat(s);
+		return isNaN(v) ? def : Math.max(0, v);
+	}
+
 	function readParams(el) {
-		const N = svc('names'), cs = getComputedStyle(el);
+		const N = svc('names'), cs = getComputedStyle(el), cfg = svc('config');
 		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
 		const c = svc('contrast').parseContrast(get('contrast'));
 		const feather = parseFeather(
@@ -101,7 +115,12 @@
 			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
 			feather,
 			blur: b > 0 ? b : 0,
-			color: cs.color
+			color: cs.color,
+			performance: parsePerf(get('performance'), cfg.performance),
+			minBudget: parseNum(get('budget-min'), cfg.minBudget),
+			backend: get('backend').toLowerCase() || cfg.backend,
+			cellSize: parseNum(get('cellsize'), cfg.cellSize),
+			maxPixelScale: parseNum(get('maxpixelscale'), cfg.maxPixelScale)
 		};
 	}
 

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Lucid Glass Editor — ipax-backdrop</title>
+	<!-- Módulos CSS Atómicos -->
+	<link rel="stylesheet" href="css/editor-layout.css">
+	<link rel="stylesheet" href="css/editor-controls.css">
+	<link rel="stylesheet" href="css/editor-combo.css">
+	<link rel="stylesheet" href="css/editor-stage.css">
+</head>
+<body>
+	<div class="ed-app" data-ed-app>
+		<!-- LEFT COLUMN: FULL-BLEED CANVAS STAGE -->
+		<main class="ed-workspace" data-ed-role="workspace">
+			<div class="ed-stage" data-ed-role="stage">
+				<div class="ed-stage-bg" data-ed-role="stage-bg"></div>
+			</div>
+		</main>
+
+		<!-- RIGHT COLUMN: COMPACT ADOBE-STYLE INSPECTOR -->
+		<aside class="ed-inspector" data-ed-role="inspector">
+			<header class="ed-inspector-top">
+				<h1 class="ed-app-title">Lucid Glass editor</h1>
+				<div class="ed-top-actions">
+					<button type="button" class="ed-btn ed-btn-primary" data-ed-action="new-box" title="Create new text box">+ New box</button>
+					<button type="button" class="ed-btn-icon" data-ed-action="delete-box" title="Delete selected box" disabled>
+						<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+							<path d="M2.5 4h11M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5"/>
+						</svg>
+					</button>
+					<button type="button" class="ed-btn-icon" data-ed-action="toggle-borders" title="Show all box borders" aria-pressed="false">
+						<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+							<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/>
+							<circle cx="8" cy="8" r="2"/>
+						</svg>
+					</button>
+				</div>
+			</header>
+
+			<!-- PANEL: PROJECT / EXPORT (Visible only when Stage is selected) -->
+			<section class="ed-panel" data-ed-panel="project">
+				<header class="ed-panel-header">Project / Export</header>
+				<div class="ed-panel-body">
+					<div class="ed-grid-3">
+						<button type="button" class="ed-btn" data-ed-action="load-json">Load</button>
+						<button type="button" class="ed-btn" data-ed-action="save-json">Save</button>
+						<button type="button" class="ed-btn" data-ed-action="reset-project">Reset</button>
+					</div>
+					<button type="button" class="ed-btn ed-btn-full" data-ed-action="save-png">Export stage (PNG)</button>
+					<p class="ed-hint-warn" data-ed-role="png-warning" hidden>&#9888;&#65039; Clean stage export requires Chrome.</p>
+					<a href="https://ipax.bustelo.com.ar/?m=lucid-glass" target="_blank" rel="noopener" class="ed-btn ed-btn-link">About Lucid Glass &amp; IPAX-backdrop &#8599;</a>
+					<input type="file" accept=".zip,.json,application/zip,application/json" data-ed-control="project-file" hidden>
+				</div>
+			</section>
+
+
+
+			<!-- PANEL: UNIFIED CONTEXTUAL BACKGROUND -->
+			<section class="ed-panel" data-ed-panel="background">
+				<header class="ed-panel-header">
+					<span>Background</span>
+					<span class="ed-panel-target" data-ed-role="bg-target-label">Stage</span>
+				</header>
+				<div class="ed-panel-body">
+					<label class="ed-prop">
+						<span class="ed-label">Type</span>
+						<select class="ed-select" data-ed-control="bg-type">
+							<option value="none">None</option>
+							<option value="image">Image</option>
+							<option value="color">Solid Color</option>
+							<option value="gradient">Gradient</option>
+						</select>
+					</label>
+
+					<!-- TYPE: IMAGE -->
+					<div class="ed-sub-group" data-ed-subpanel="bg-image" hidden>
+						<div class="ed-img-preview" data-ed-action="pick-bg-image" role="button" tabindex="0">
+							<span class="ed-img-text">Drag image or click to change</span>
+							<input type="file" accept="image/*" data-ed-control="bg-file" hidden>
+						</div>
+						<div class="ed-grid-2">
+							<label class="ed-prop-compact">
+								<span class="ed-label-sm">Fit</span>
+								<select class="ed-select" data-ed-control="bg-img-fit">
+									<option value="cover">Cover</option>
+									<option value="contain">Contain</option>
+									<option value="100% 100%">Stretch</option>
+									<option value="auto">Auto</option>
+								</select>
+							</label>
+							<label class="ed-prop-compact" data-ed-role="bg-img-opacity-row" hidden>
+								<span class="ed-label-sm" title="Opacity">Opac.</span>
+								<input type="number" min="0" max="100" step="1" value="100" data-ed-num="bg-img-opacity">
+								<span class="ed-unit">%</span>
+							</label>
+						</div>
+						<input type="range" min="0" max="100" step="1" value="100" data-ed-control="bg-img-opacity" class="ed-range-full" hidden>
+						<button type="button" class="ed-btn ed-btn-full" data-ed-action="delete-bg" disabled>Delete background</button>
+					</div>
+
+					<!-- TYPE: SOLID COLOR -->
+					<div class="ed-sub-group" data-ed-subpanel="bg-color" hidden>
+						<label class="ed-prop">
+							<span class="ed-label">Color</span>
+							<input type="color" value="#000000" class="ed-input-color" data-ed-control="bg-color-val">
+						</label>
+						<label class="ed-prop">
+							<span class="ed-label">Opacity</span>
+							<input type="range" min="0" max="100" step="1" value="40" data-ed-control="bg-color-alpha">
+							<input type="number" min="0" max="100" step="1" value="40" data-ed-num="bg-color-alpha">
+						</label>
+					</div>
+
+					<!-- TYPE: GRADIENT -->
+					<div class="ed-sub-group" data-ed-subpanel="bg-gradient" hidden>
+						<div class="ed-prop">
+							<span class="ed-label">Start</span>
+							<input type="color" value="#000000" class="ed-swatch-sm" data-ed-control="bg-grad-c1">
+							<input type="range" min="0" max="100" step="1" value="60" data-ed-control="bg-grad-a1">
+							<input type="number" min="0" max="100" step="1" value="60" data-ed-num="bg-grad-a1">
+						</div>
+						<div class="ed-prop">
+							<span class="ed-label">End</span>
+							<input type="color" value="#1a4fd6" class="ed-swatch-sm" data-ed-control="bg-grad-c2">
+							<input type="range" min="0" max="100" step="1" value="30" data-ed-control="bg-grad-a2">
+							<input type="number" min="0" max="100" step="1" value="30" data-ed-num="bg-grad-a2">
+						</div>
+						<label class="ed-prop">
+							<span class="ed-label">Angle</span>
+							<input type="range" min="0" max="360" step="1" value="135" data-ed-control="bg-grad-angle">
+							<input type="number" min="0" max="360" step="1" value="135" data-ed-num="bg-grad-angle">
+						</label>
+					</div>
+				</div>
+			</section>
+
+			<!-- PANEL: PERFORMANCE (Visible only when Stage is selected) -->
+			<section class="ed-panel" data-ed-panel="performance">
+				<header class="ed-panel-header">Performance</header>
+				<div class="ed-panel-body">
+					<label class="ed-prop">
+						<span class="ed-label">Profile</span>
+						<select class="ed-select" data-ed-control="perf-preset">
+							<option value="high">High Quality</option>
+							<option value="balanced">Balanced</option>
+							<option value="fast">Fast</option>
+							<option value="custom">Custom</option>
+						</select>
+					</label>
+					<div class="ed-sub-group" data-ed-subpanel="perf-custom" hidden>
+						<label class="ed-prop">
+							<span class="ed-label">Backend</span>
+							<select class="ed-select" data-ed-control="perf-backend">
+								<option value="auto">Auto (WebGL)</option>
+								<option value="webgl">WebGL 1</option>
+								<option value="cpu">CPU</option>
+							</select>
+						</label>
+						<label class="ed-prop"><span class="ed-label">Cell Size</span><input type="range" min="1" max="48" step="1" value="12" data-ed-control="perf-cellsize"><input type="number" min="1" max="48" step="1" value="12" data-ed-num="perf-cellsize"></label>
+						<label class="ed-prop"><span class="ed-label">Target FPS</span><input type="range" min="0" max="120" step="5" value="0" data-ed-control="perf-fps"><input type="number" min="0" max="120" step="5" value="0" data-ed-num="perf-fps"></label>
+						<label class="ed-prop"><span class="ed-label">Min Budget</span><input type="range" min="1" max="500000" step="1000" value="65536" data-ed-control="perf-budget"><input type="number" min="1" max="500000" step="1000" value="65536" data-ed-num="perf-budget"></label>
+						<label class="ed-prop"><span class="ed-label">Max Scale</span><input type="range" min="0.5" max="3" step="0.25" value="2" data-ed-control="perf-scale"><input type="number" min="0.5" max="3" step="0.25" value="2" data-ed-num="perf-scale"></label>
+					</div>
+				</div>
+			</section>
+
+			<!-- CONTEXTUAL BOX PANELS -->
+			<div data-ed-role="box-panels" hidden>
+				<!-- PANEL: CHARACTER -->
+				<section class="ed-panel" data-ed-panel="character">
+					<header class="ed-panel-header">Character</header>
+					<div class="ed-panel-body">
+						<div class="ed-prop-col">
+							<span class="ed-label-top">Font</span>
+							<div class="ed-combo" data-ed-role="font-combo">
+								<input type="text" class="ed-combo-input" placeholder="System or Google font..." autocomplete="off" spellcheck="false" data-ed-control="char-font">
+								<button type="button" class="ed-combo-toggle" data-ed-action="toggle-font-menu" aria-label="Font presets">&#9662;</button>
+								<ul class="ed-combo-menu" data-ed-role="font-menu" hidden></ul>
+							</div>
+							<div class="ed-font-status" data-ed-role="font-status">System or Google font</div>
+						</div>
+
+						<div class="ed-grid-3">
+							<label class="ed-prop-compact" title="Font Size">
+								<span class="ed-icon">T</span>
+								<input type="number" min="8" max="400" step="1" value="32" class="ed-input-num" data-ed-control="char-size">
+							</label>
+							<label class="ed-prop-compact" title="Line Height">
+								<span class="ed-icon">&#8597;</span>
+								<input type="number" min="0.5" max="3" step="0.05" value="1.25" class="ed-input-num" data-ed-control="char-leading">
+							</label>
+							<label class="ed-prop-compact" title="Text Color">
+								<input type="color" value="#ffffff" class="ed-input-color" data-ed-control="char-color">
+							</label>
+						</div>
+
+						<div class="ed-toolbar-row">
+							<div class="ed-button-group">
+								<button type="button" class="ed-btn-icon" data-ed-format="bold" title="Bold"><b>B</b></button>
+								<button type="button" class="ed-btn-icon" data-ed-format="italic" title="Italic"><i>I</i></button>
+								<button type="button" class="ed-btn-icon" data-ed-format="underline" title="Underline"><u>U</u></button>
+								<button type="button" class="ed-btn-icon" data-ed-format="strikeThrough" title="Strikethrough"><s>S</s></button>
+							</div>
+							<div class="ed-button-group ed-button-group-grow">
+								<select class="ed-select" data-ed-control="char-align-h" title="Horizontal Align">
+									<option value="left">Left</option>
+									<option value="center">Center</option>
+									<option value="right">Right</option>
+								</select>
+								<select class="ed-select" data-ed-control="char-align-v" title="Vertical Align">
+									<option value="flex-start">Top</option>
+									<option value="center">Middle</option>
+									<option value="flex-end">Bottom</option>
+								</select>
+							</div>
+						</div>
+
+						<!-- PADDING MASTER + DISCLOSURE TRIANGLE TRBL -->
+						<div class="ed-prop ed-mt-xs">
+							<button type="button" class="ed-disclosure" data-ed-action="toggle-padding" aria-expanded="false" title="Expand Padding">&#9656;</button>
+							<span class="ed-label ed-label-short">Padding</span>
+							<input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-padding">
+							<input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-padding">
+						</div>
+						<div class="ed-sub-group ed-indent-trbl" data-ed-subpanel="padding-trbl" hidden>
+							<label class="ed-prop"><span class="ed-label">Top</span><input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-pad-t"><input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-pad-t"></label>
+							<label class="ed-prop"><span class="ed-label">Bottom</span><input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-pad-b"><input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-pad-b"></label>
+							<label class="ed-prop"><span class="ed-label">Left</span><input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-pad-l"><input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-pad-l"></label>
+							<label class="ed-prop"><span class="ed-label">Right</span><input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-pad-r"><input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-pad-r"></label>
+						</div>
+					</div>
+				</section>
+
+				<!-- PANEL: LUCID GLASS (IPAX-BACKDROP) -->
+				<section class="ed-panel" data-ed-panel="ipax">
+					<header class="ed-panel-header">Lucid Glass (IPAX-backdrop)</header>
+					<div class="ed-panel-body">
+						<label class="ed-prop">
+							<span class="ed-label">Mode</span>
+							<select class="ed-select" data-ed-control="ipax-mode">
+								<option value="default">Default</option>
+								<option value="tricontrast">Tricontrast</option>
+							</select>
+						</label>
+						<label class="ed-prop">
+							<span class="ed-label">Contrast</span>
+							<input type="range" min="1" max="15" step="0.5" value="4.5" data-ed-control="ipax-contrast">
+							<input type="number" min="1" max="15" step="0.5" value="4.5" data-ed-num="ipax-contrast">
+						</label>
+						<label class="ed-prop">
+							<span class="ed-label">Blur</span>
+							<input type="range" min="0" max="32" step="1" value="8" data-ed-control="ipax-blur">
+							<input type="number" min="0" max="32" step="1" value="8" data-ed-num="ipax-blur">
+						</label>
+
+						<!-- FEATHER MASTER + DISCLOSURE TRIANGLE TRBL -->
+						<div class="ed-prop">
+							<button type="button" class="ed-disclosure" data-ed-action="toggle-feather" aria-expanded="false" title="Expand Feather">&#9656;</button>
+							<span class="ed-label ed-label-short">Feather</span>
+							<input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather">
+							<input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather">
+						</div>
+						<div class="ed-sub-group ed-indent-trbl" data-ed-subpanel="feather-trbl" hidden>
+							<label class="ed-prop"><span class="ed-label">Top</span><input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather-t"><input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather-t"></label>
+							<label class="ed-prop"><span class="ed-label">Bottom</span><input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather-b"><input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather-b"></label>
+							<label class="ed-prop"><span class="ed-label">Left</span><input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather-l"><input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather-l"></label>
+							<label class="ed-prop"><span class="ed-label">Right</span><input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather-r"><input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather-r"></label>
+						</div>
+					</div>
+				</section>
+			</div>
+
+			<div class="ed-inspector-bottom">
+				
+				<a href="https://www.bustelo.com.ar/en/" target="_blank" rel="noopener" class="ed-btn ed-btn-link ed-by">
+					v.0.1.04 • 2026, Santiago Bustelo
+				</a>
+			
+				<div class="ed-telemetry-bar" data-ed-role="perf-telemetry">Engine: initializing...</div>
+
+				<footer class="ed-inspector-footer" data-ed-role="storage-footer">
+					<span class="ed-storage-status" data-ed-role="storage-status">Clean state (IndexedDB: 0 bytes)</span>
+					<button type="button" class="ed-btn ed-btn-xs" data-ed-action="purge-db" title="Purge IndexedDB auto-saved state">Purge</button>
+				</footer>
+			</div>
+		</aside>
+	</div>
+
+	<!-- Core Engine & Editor Modules -->
+	<script src="../dist/ipax-backdrop.min.js"></script>
+	<script src="js/editor-bus.js"></script>
+	<script src="js/editor-presets.js"></script>
+	<script src="js/editor-zip.js"></script>
+	<script src="js/editor-idb.js"></script>
+	<script src="js/editor-serializer.js"></script>
+	<script src="js/editor-export-png.js"></script>
+	<script src="js/editor-storage.js"></script>
+	<script src="js/editor-performance.js"></script>
+	<script src="js/editor-background.js"></script>
+	<script src="js/editor-boxes.js"></script>
+	<script src="js/editor-fonts.js"></script>
+	<script src="js/editor-richtext.js"></script>
+	<script src="js/editor-inspector.js"></script>
+</body>
+</html>

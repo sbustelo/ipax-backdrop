@@ -53,10 +53,12 @@
 
 	/** Mutable. Change before start() or at any time; read on every update. */
 	const config = {
-		backend: 'auto',   // 'auto' | 'webgl' | 'cpu'
-		cellSize: 12,      // CSS px; resolution of the "what is underneath" probe grid
-		maxPixels: 60000,  // working resolution cap (pixels) per managed element
-		autoStart: true    // start on DOMContentLoaded
+		backend: 'auto',    // 'auto' | 'webgl' | 'cpu' (CSS: --ipax-backdrop-backend)
+		cellSize: 12,       // CSS px; probe grid resolution (CSS: --ipax-backdrop-cellsize)
+		performance: 60,    // target FPS; 0 = infinite budget (CSS: --ipax-backdrop-performance)
+		minBudget: 65536,   // minimum working pixel budget per element (CSS: --ipax-backdrop-budget-min)
+		maxPixelScale: 2,   // Retina/HiDPI pixel scale ceiling (CSS: --ipax-backdrop-maxpixelscale)
+		autoStart: true     // start on DOMContentLoaded
 	};
 
 	// Payload contracts, checked by the j0 bus when window.j0.QA is truthy.

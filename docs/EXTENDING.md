@@ -18,6 +18,8 @@ bus.on('ipax-backdrop:backend', (d) => console.log('kernel backend:', d.backend,
 
 ## Control the library
 
+Runtime engine parameters (`backend`, `cellSize`, `performance`, `minBudget`, `maxPixelScale`) can be configured via CSS custom properties (`--ipax-backdrop-*`) or through `ipax.config`:
+
 ```js
 const ipax = window.j0.get('ipax-backdrop');
 ipax.config.autoStart = false;   // set before DOMContentLoaded
@@ -79,4 +81,4 @@ If you change anything in `3100-kernel-cpu.js` that is not just a call to `0110-
 
 ---
 
-_IPAX Backdrop v0.1.02 • 2026-11-10 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop v0.1.04 • 2026-11-14 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

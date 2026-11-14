@@ -53,7 +53,7 @@
 	}
 
 	function render(input) {
-		const mode = svc('config').backend;
+		const mode = (input.params && input.params.backend) || svc('config').backend;
 		if (mode !== 'cpu') {
 			const gl = svc('kernel-webgl');
 			if (gl && gl.available()) {

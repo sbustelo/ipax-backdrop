@@ -1,0 +1,108 @@
+/* PATH: examples/css/editor-combo.css */
+/* Custom Dark Font Combo-Box */
+.ed-combo {
+	position: relative;
+	display: flex;
+	width: 100%;
+}
+
+.ed-combo-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--ui-input);
+	border: 1px solid var(--ui-border);
+	border-right: 0;
+	color: var(--ui-text);
+	padding: 4px 6px;
+	font-size: 11px;
+	border-radius: 2px 0 0 2px;
+}
+
+.ed-combo-toggle {
+	width: 22px;
+	flex: none;
+	background: #262626;
+	border: 1px solid var(--ui-border);
+	color: var(--ui-text-mut);
+	border-radius: 0 2px 2px 0;
+	cursor: pointer;
+	font-size: 10px;
+}
+
+.ed-combo-toggle:hover {
+	background: #3a3a3a;
+	color: var(--ui-text);
+}
+
+.ed-combo-menu:not([hidden]) {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	z-index: 50;
+	margin: 2px 0 0;
+	padding: 3px 0;
+	list-style: none;
+	background: #252526;
+	border: 1px solid #555555;
+	border-radius: 3px;
+	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+	max-height: 190px;
+	overflow-y: auto;
+}
+
+.ed-combo-item {
+	padding: 5px 8px;
+	font-size: 11px;
+	color: var(--ui-text);
+	cursor: pointer;
+	display: flex;
+	justify-content: space-between;
+	gap: 6px;
+}
+
+.ed-combo-item:hover { background: var(--ui-accent); color: #ffffff; }
+.ed-combo-tag { font-size: 9px; opacity: 0.65; }
+
+.ed-font-status { font-size: 10px; color: var(--ui-text-mut); line-height: 1.3; }
+.ed-font-status.is-error { color: #ff6b6b; }
+
+/* Image Dropzone */
+.ed-img-preview {
+	width: 100%;
+	height: 104px;
+	background-color: #ffffff;
+	background-image: var(--checker-svg);
+	background-repeat: repeat;
+	background-size: 16px 16px;
+	border: 1px dashed #666666;
+	border-radius: 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	text-align: center;
+	padding: 8px;
+}
+
+.ed-img-preview.has-image {
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
+	border-style: solid;
+	border-color: var(--ui-border);
+}
+
+.ed-img-preview.is-dragover {
+	border-color: var(--ui-accent);
+	box-shadow: inset 0 0 0 2px var(--ui-accent);
+}
+
+.ed-img-text {
+	background: rgba(20, 20, 20, 0.74);
+	color: #ffffff;
+	padding: 4px 8px;
+	border-radius: 3px;
+	font-size: 10px;
+	pointer-events: none;
+}

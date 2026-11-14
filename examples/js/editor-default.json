@@ -1,0 +1,56 @@
+{
+	"version": 1,
+	"stageBg": {
+		"type": "image",
+		"image": "img/ipax-couple-2026-11.jpg",
+		"imgFit": "cover",
+		"imgOpacity": 100
+	},
+	"showBorders": false,
+	"boxes": [
+		{
+			"geom": {
+				"left": "27px",
+				"top": "35px",
+				"width": "436px",
+				"height": "514.953px",
+				"zIndex": "177"
+			},
+			"state": {
+				"fontInput": "system-ui, -apple-system, sans-serif",
+				"fontStatus": "System font stack",
+				"fontError": false,
+				"padding": {
+					"t": 24,
+					"r": 24,
+					"b": 24,
+					"l": 24
+				},
+				"bg": {
+					"type": "none"
+				},
+				"ipax": {
+					"mode": "default",
+					"contrast": 4.5,
+					"blur": 0,
+					"feather": {
+						"t": 0,
+						"r": 0,
+						"b": 0,
+						"l": 0
+					}
+				}
+			},
+			"styles": {
+				"fontFamily": "system-ui, -apple-system, sans-serif",
+				"fontSize": "21px",
+				"lineHeight": "1.4",
+				"color": "rgb(255, 255, 255)",
+				"textAlign": "left",
+				"justifyContent": "center",
+				"padding": "24px"
+			},
+			"html": "<b>IPAX Lucid Glass editor</b><br><br>Select, drag and resize this editable text box anywhere over the picture.&nbsp;<span style=\"color: inherit; font-family: inherit; text-align: inherit;\">Use the inspector on the right to adjust&nbsp;</span><b style=\"color: inherit; font-family: inherit; text-align: inherit;\">contrast</b><span style=\"color: inherit; font-family: inherit; text-align: inherit;\">, </span><b style=\"color: inherit; font-family: inherit; text-align: inherit;\">blur</b><span style=\"color: inherit; font-family: inherit; text-align: inherit;\">, and </span><b style=\"color: inherit; font-family: inherit; text-align: inherit;\">feather</b><span style=\"color: inherit; font-family: inherit; text-align: inherit;\">.</span><div><div><br><div>The engine recalculates the background lightness in real-time to guarantee perfect legibility (WCAG 2) without needing<span style=\"color: inherit; font-family: inherit; text-align: inherit;\">&nbsp;flat overlays or dark gradients.</span></div></div><div><span style=\"color: inherit; font-family: inherit; text-align: inherit;\"><br></span></div><div>Click outside this box (on the canvas) to change the stage background or access Load, Save &amp; Reset.</div></div>"
+		}
+	]
+}

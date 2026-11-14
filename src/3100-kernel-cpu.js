@@ -155,7 +155,9 @@
 				} else if (M >= 0.999) nV++;
 
 				const pv = tri ? tv : pcs[wk > 0.5 ? kk + 1 : 0];
-				const wV = (1 - known) * pv.al * M, aO = known + wV;
+				const bypass = K.isBypass(ratio);
+				const wV = bypass ? 0 : (1 - known) * pv.al * M;
+				const aO = known + wV;
 				if (aO <= 0) continue;
 				out[q] = (known * ir + wV * pv.vc) / aO;
 				out[q + 1] = (known * ig + wV * pv.vc) / aO;

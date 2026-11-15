@@ -1,0 +1,16 @@
+/* ipax-backdrop parity page: layout only. */
+:root { color-scheme: light dark; --pt-line: #c9ced8; --pt-ok: #1a7f37; --pt-bad: #c62828; --pt-mut: #5a6472; }
+body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.pt-page { max-width: 860px; margin: 0 auto; padding: 16px; }
+.pt-note { color: var(--pt-mut); font-size: 13px; }
+.pt-banner { padding: 10px 12px; border: 1px solid var(--pt-line); border-radius: 6px; font-weight: 700; }
+.pt-banner-pass { border-color: var(--pt-ok); color: var(--pt-ok); }
+.pt-banner-fail { border-color: var(--pt-bad); color: var(--pt-bad); }
+.pt-banner-skip { color: var(--pt-mut); }
+.pt-env { font-size: 12px; color: var(--pt-mut); word-break: break-word; }
+.pt-table { border-collapse: collapse; width: 100%; margin: 10px 0 18px; font-size: 13px; }
+.pt-table th, .pt-table td { border: 1px solid var(--pt-line); padding: 4px 8px; text-align: left; }
+.pt-table td.pt-num { text-align: right; font-variant-numeric: tabular-nums; }
+.pt-pass { color: var(--pt-ok); font-weight: 700; }
+.pt-fail { color: var(--pt-bad); font-weight: 700; }
+button { font: inherit; padding: 6px 12px; }

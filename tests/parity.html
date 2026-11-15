@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ipax-backdrop: CPU vs GPU parity</title>
+<link rel="stylesheet" href="parity.css">
+</head>
+<body>
+<main class="pt-page" data-ref="root">
+	<h1>CPU vs GPU parity</h1>
+	<p class="pt-note">Runs the CPU kernel and the WebGL kernel on the same inputs and compares the pixels. Each result is composited over black and over white (the two worst-case backdrops) before comparing, so differences in colour <em>and</em> in alpha both show. A scenario passes when no channel differs by more than 8 levels and fewer than 1% differ by more than 2. Contrast guarantees are also measured on the GPU output.</p>
+	<p class="pt-banner" data-ref="banner">Running...</p>
+	<p class="pt-env" data-ref="env"></p>
+	<button type="button" data-ref="again">Run again</button>
+	<table class="pt-table" data-ref="table">
+		<thead><tr><th>Scenario</th><th>Max diff</th><th>&gt; 2</th><th>&gt; 8</th><th>Result</th></tr></thead>
+		<tbody data-ref="rows"></tbody>
+	</table>
+	<h2>Contrast guarantee on the GPU output</h2>
+	<table class="pt-table">
+		<thead><tr><th>Scenario</th><th>Target</th><th>Minimum measured</th><th>Pixels under</th><th>Result</th></tr></thead>
+		<tbody data-ref="grows"></tbody>
+	</table>
+</main>
+
+
+<script src="../dist/ipax-backdrop.min.js"></script>
+<script src="parity.js"></script>
+</body>
+</html>

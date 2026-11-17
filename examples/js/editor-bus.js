@@ -7,7 +7,7 @@
 	const state = {
 		activeBox: null,
 		zCounter: 10,
-		showBorders: false,
+		showEffect: true,
 		performance: null,
 		stageBg: {
 			type: 'none',

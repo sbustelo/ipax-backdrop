@@ -12,25 +12,34 @@
 	<main class="ex-page" data-ref="root">
 
 		<!--
-			The effect is declared in example.css (--ipax-backdrop-* properties).
+			The effect is declared in index-example.css (--ipax-backdrop, --ipax-text, --ipax-mode).
 			
-			The data-ipax-backdrop attribute is an optional marker: it lets the library
-			find the element even when the stylesheet cannot be read (cross-origin, or
-			a linked file opened from file://).
+			The data-ipax-backdrop / data-ipax-text attributes are optional markers: they let
+			the library find the element even when the stylesheet cannot be read (cross-origin,
+			or a linked file opened from file://).
 		-->
 
 		<header class="ex-hero" data-ref="hero">
-			<div class="ex-hero-header">
-				<label class="ex-toggle-wrap">
-					<span>Show effect</span>
-					<input type="checkbox" class="ex-switch" data-ctl="effect-hero" checked />
+			<fieldset class="ex-hero-header" aria-label="Effect">
+				<div class="ex-hero-legend">EFFECT</div>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="lucid" data-ctl="effect-mode" checked>
+					<span>Lucid Glass</span>
 				</label>
-			</div>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="overlays" data-ctl="effect-mode">
+					<span>Overlays, gradients &amp; text-shadows</span>
+				</label>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="none" data-ctl="effect-mode">
+					<span>None</span>
+				</label>
+			</fieldset>
 			
-			<h1 class="example-title" data-label="Title" data-ipax-backdrop >
+			<h1 class="example-title" data-label="Title" data-ipax-backdrop data-ipax-text>
 				Lucid Glass
 			</h1>
-			<div class="example-hero-block" data-ipax-backdrop >
+			<div class="example-hero-block" data-ipax-backdrop>
 				<p>
 					A vanilla JavaScript &amp; WebGL backdrop-filter to get
 					<strong>legible text over any picture,</strong> without 
@@ -40,19 +49,19 @@
 		</header>
 
 
-		<h2>IPAX-backdrop <span style="font-weight: normal;">with linear blur</span></h2>
+		<h2>IPAX-backdrop <span style="font-weight: normal;">with linear blur &amp; glyph contour</span></h2>
 
 		<p class="destacado">Corrects whatever is behind an element to <strong>guarantee WCAG 2 contrast.</strong></p>
         
 		<p>The engine adjusts the lightness (L&nbsp;in OKLab) of the picture's pixels underneath the text, just as necessary to hit the target ratio. Blur and a feather mask can be applied. Setting the contrast to <code>1</code> turns the engine into a pure linear blur utility.</p>
 
-		<p>The text boxes above are plain <code>HTML</code> elements driven by <code>--ipax-backdrop-*</code> CSS properties.</p>
+		<p>The text boxes above are plain <code>HTML</code> elements driven by <code>--ipax-backdrop</code> and <code>--ipax-text</code> CSS properties.</p>
 
 		<p><a href="https://github.com/sbustelo/ipax-backdrop" target="_blank">Source and documentation on GitHub &raquo;</a></p>
 
 		<h2>Experiment</h2>
 
-		<p class="destacado">Drag any box and resize it from its bottom-right corner. The boxes labeled <strong>"Light and dark"</strong> and <strong>"Custom color"</strong> use the effect; the others are test backdrops.</p>
+		<p class="destacado">Drag any box and resize it from its bottom-right corner. <strong>Box A</strong> and <strong>Box B</strong> use <code>--ipax-backdrop</code>; <strong>Box C</strong> uses standalone <code>--ipax-text</code>; the others are test backdrops.</p>
             
 		<p>The primary goal is ensuring legible text over photos. To do this <em>without asking for screen-capture permissions</em>, the engine must rebuild the background by extracting only images and solid colors, ignoring other DOM content.</p>
 
@@ -93,14 +102,22 @@
 			</div>
 			<div class="ex-box" data-box data-label="Box A" data-x="30" data-y="100" data-w="200" data-h="100"
 				data-z="6">
+				<span class="ex-box-tag">Box A</span>
 				<div class="ex-glass" data-ipax-backdrop><span>Light</span>&nbsp;<span class="ex-k">and
 						dark</span> </div><span class="ex-grip" data-grip></span>
 			</div>
 			<div class="ex-box" data-box data-label="Box B" data-x="300" data-y="230" data-w="310" data-h="120"
 				data-z="7">
+				<span class="ex-box-tag">Box B</span>
 				<div class="ex-glass ex-custom-text" data-ipax-backdrop>Custom color</div><span class="ex-grip" data-grip></span>
 			</div>
+			<div class="ex-box ex-text-only-box" data-box data-label="Box C" data-x="230" data-y="40" data-w="320" data-h="110"
+				data-z="8">
+				<span class="ex-box-tag">Box C</span>
+				<div class="ex-text-only" data-ipax-text>Glyph contour only (--ipax-text)</div><span class="ex-grip" data-grip></span>
+			</div>
 		</div>
+
 		<p class="ex-report" data-ref="report"></p>
 		<p class="ex-report" data-ref="status"></p>
 
@@ -112,17 +129,12 @@
 		</label>
 			
 		<label class="ex-row">
-			<span>Contrast (WCAG ratio) <sup>2</sup> <small class="ex-hint">Set to <code>1</code> to bypass lightness adaptation</small></span> </span>
+			<span>Contrast (WCAG ratio) <sup>2</sup> <small class="ex-hint">Set to <code>1</code> to bypass lightness adaptation</small></span>
 			<span class="ex-pair">
 				<input type="range" data-ctl="contrast" min="1" max="15" step="0.5" value="4.5" />
 				<input type="number" data-ctl="contrast" min="1" max="15" step="0.5" value="4.5" />
 			</span>
 		</label>
-
-		
-
-
-
 
 		<details class="ex-disclosure">
 			<summary class="ex-summary">
@@ -165,14 +177,6 @@
 				</label>
 			</div>
 		</details>
-
-
-
-
-
-			
-		
-		
 		
 		<label class="ex-row">
 			<span>Element blur (px) <sup>3</sup></span>
@@ -181,6 +185,45 @@
 				<input type="number" data-ctl="blur" min="0" max="16" step="1" value="4" />
 			</span>
 		</label>
+
+		<details class="ex-disclosure" open>
+			<summary class="ex-summary">
+				<div class="ex-row">
+					<span>Glyph contour (--ipax-text) <small class="ex-hint">(Box C)</small></span>
+					<span></span>
+				</div>
+			</summary>
+			<div class="ex-disclosure-body">
+				<label class="ex-row">
+					<span>Text contrast (WCAG ratio)</span>
+					<span class="ex-pair">
+						<input type="range" data-ctl="text-contrast" min="1" max="15" step="0.5" value="7">
+						<input type="number" data-ctl="text-contrast" min="1" max="15" step="0.5" value="7">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Halo radius (px)</span>
+					<span class="ex-pair">
+						<input type="range" data-ctl="text-halo" min="0" max="32" step="1" value="12">
+						<input type="number" data-ctl="text-halo" min="0" max="32" step="1" value="12">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Spread (%)</span>
+					<span class="ex-pair">
+						<input type="range" data-ctl="text-spread" min="0" max="100" step="1" value="35">
+						<input type="number" data-ctl="text-spread" min="0" max="100" step="1" value="35">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Glyph background blur (px)</span>
+					<span class="ex-pair">
+						<input type="range" data-ctl="text-blur" min="0" max="24" step="1" value="6">
+						<input type="number" data-ctl="text-blur" min="0" max="24" step="1" value="6">
+					</span>
+				</label>
+			</div>
+		</details>
 
 		<label class="ex-row">
 			<span>Text color (Box B)</span>
@@ -224,21 +267,14 @@
 
 		<br>
 
-
-
-
-
-
 		<p class="ex-small">
 			1. <strong>Tricontrast</strong> keeps the backdrop inside the band where white and black text both reach the ratio. 
 		<a href="https://medium.com/santiago-bustelo-in-english/tricontrast-the-swiss-school-with-wcag-accessibility-a5da3d9ae9fd#:~:text=monochromatic%20Tricontrast%20space" target="_blank">It only exists up to 4.5:1</a>, where monochromatic options narrow just to <code>#757575</code> and <code>#767676</code>, flattening the picture's luminosity into a near-uniform field.
 		</p>
 
 		<p class="ex-small">
-		2. <strong>APCA contrast is not offered</strong>, as the GPU shader cannot depend on (or faithfully reproduce) the licensed reference implementation.
+		2. <strong>APCA contrast (<code>Lc</code> or values &gt; 15)</strong> emits a warning and falls back to an equivalent WCAG 2 ratio (capped at 15:1) until native APCA licensing is enabled.
 		</p>
-
-		
 
 		<p class="ex-small">
 			3. <strong>WCAG is defined for text over a plain color;</strong> it says nothing about how the formula should be adjusted for text over a picture. In my experiments, image detail "fights" the legibility of the text: without blur, it's better to raise the contrast to the next tier (from 3 to 4.5, and from 4.5 to 7). A blurred backdrop moves the image closer to the flat-field case the model measures, so the reported ratio becomes a more meaningful predictor of legibility.<br>
@@ -248,7 +284,7 @@
 		<hr style="margin:20pt 0">
 
 		<p class="ex-small">
-			IPAX-backdrop v0.1.03 • November 2026. Part of the <a href="https://ipax.bustelo.com.ar/">IPAX System</a>.
+			IPAX-backdrop v0.1.10 • November 2026. Part of the <a href="https://ipax.bustelo.com.ar/">IPAX System</a>.
 		</p>
 
 

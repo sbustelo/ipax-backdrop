@@ -12,30 +12,22 @@
  * CONTRACT (both backends)
  *   render(input) -> {source, stats, tainted}
  *   input = {
- *     est      HTMLCanvasElement  estimated backdrop (w x h), from the resolver
- *     estBlur  HTMLCanvasElement | null   the same estimate blurred (2300). Mixed with `est` by the
- *                                 feather mask before the lightness solve; null = no blur
- *     grid     {V, nx, ny, g}     unknown cells, from the resolver
- *     w, h     working size in px
- *     s        working px per CSS px
- *     W, H     element size in CSS px
- *     params   {ratio, mode, feather, blur}   from the reader. ratio <= 1 (contrast.isBypass) skips the
- *                                 solve and the veil: the output is just the (blurred) estimate
- *     colors   {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}   from reader-text
+ *     est       HTMLCanvasElement  estimated backdrop (w x h), from the resolver
+ *     estBlur   HTMLCanvasElement | null   single-pass blurred estimate at maxBlur * s
+ *     grid      {V, nx, ny, g}     unknown cells, from the resolver
+ *     w, h      working size in px
+ *     s         working px per CSS px
+ *     W, H      BOX size in CSS px
+ *     ox, oy    origin of the box inside the layer, CSS px
+ *     halo      null | {ratio, mode, blur, shared, mask:{data:Uint8Array, mw, mh, cs}}
+ *     boxCover  boolean            false = container inactive; only --ipax-text paints
+ *     boxBlur   number             container image blur in CSS px
+ *     textBlur  number             glyph-contour image blur in CSS px
+ *     maxBlur   number             Math.max(boxBlur, textBlur)
+ *     infl      number             influence radius (CSS px) of a coloured text run, >= 6
+ *     params    {ratio, mode, feather, blur}
+ *     colors    {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}
  *   }
- *   source   ImageData (CPU) or HTMLCanvasElement (WebGL), w x h. Pixels are
- *            opaque where the backdrop is known and translucent veil where it
- *            is not. NOTE: a WebGL source is only valid until the next render,
- *            so the caller must paint it immediately.
- *   stats    {min, under, nI, nV, inf} measured contrast statistics (CPU only;
- *            null on WebGL, where nothing is read back from the GPU).
- *   tainted  true when the estimate could not be read (cross-origin image);
- *            the whole area then gets the veil.
- *
- * Selection (config.backend): 'auto' tries WebGL and falls back to CPU for
- * good if it is unavailable or throws; 'cpu' never tries WebGL; 'webgl' tries
- * WebGL first but still falls back, because a missing result is worse than a
- * slower one. Every change of backend emits 'ipax-backdrop:backend'.
  *
  * Service 'ipax-backdrop:kernel': render(input), activeBackend()
  */

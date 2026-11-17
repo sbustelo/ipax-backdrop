@@ -33,7 +33,7 @@ Returns the total number of palettes in the built-in catalog (`number`).
 Returns a defensive copy (`string[]`) of the palette at `index` (normalized with modular arithmetic).
 
 #### `ExampleImages.generateStylePool(count)`
-Generates `count` random `640×480` textures (2–8 shuffled colors each) and injects `.pt-bg-0` through `.pt-bg-{count-1}` CSS rules into `<head>` for high-density grids such as `examples/performance-test.html`.
+Generates `count` random `640×480` textures (2–8 shuffled colors each) and injects `.pt-bg-0` through `.pt-bg-{count-1}` CSS rules into `<head>` for high-density grids such as `examples/performance-test.php`.
 
 #### `ExampleImages.paintImage(seed, w, h, cols, quality = 0.82)`
 Low-level canvas painter preserved for backwards compatibility.
@@ -67,7 +67,8 @@ const stableUrl = ExampleImages.generate(640, 480, 'card-contrast', {
 
 // 5. Custom brand palette with randomized geometry
 const customUrl = ExampleImages.generate(640, 480, ['#00364C', '#006277', '#8E51FB']);
+```
 
 ---
 
-_IPAX Backdrop v0.1.05 • 2026-11-14 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

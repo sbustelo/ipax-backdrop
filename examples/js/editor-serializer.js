@@ -1,4 +1,4 @@
-/* PATH: examples/js/editor-serializer.js */
+// PATH: examples/js/editor-serializer.js
 (function () {
 	'use strict';
 
@@ -132,7 +132,12 @@
 					fontError: b._state.fontError,
 					padding: Object.assign({}, b._state.padding),
 					bg: serializeBg(b._state.bg),
-					ipax: Object.assign({}, b._state.ipax, { feather: Object.assign({}, b._state.ipax.feather) })
+					ipax: Object.assign({}, b._state.ipax, {
+						boxEnabled: b._state.ipax.boxEnabled !== false,
+						textEnabled: !!b._state.ipax.textEnabled,
+						feather: Object.assign({}, b._state.ipax.feather),
+						text: Object.assign({ contrast: 7, halo: 12, spread: 35, blur: 0, x: 0, y: 0 }, b._state.ipax.text)
+					})
 				},
 				styles: {
 					fontFamily: glass.style.fontFamily,
@@ -185,11 +190,17 @@
 			const fontTasks = [];
 
 			data.boxes.forEach((bData) => {
+				const rawIpax = (bData.state && bData.state.ipax) || {};
+				const rawText = Object.assign({ contrast: 7, halo: 12, spread: 35, blur: 0, x: 0, y: 0 }, rawIpax.text);
+				const inferredTextOn = rawIpax.textEnabled !== undefined ? !!rawIpax.textEnabled : (rawText.contrast > 1 || rawText.blur > 0);
 				const hydratedState = Object.assign({}, bData.state, {
 					padding: Object.assign({ t: 24, r: 24, b: 24, l: 24 }, bData.state && bData.state.padding),
 					bg: hydrateBg(bData.state && bData.state.bg, assetMap),
-					ipax: Object.assign({ mode: 'default', contrast: 4.5, blur: 8 }, bData.state && bData.state.ipax, {
-						feather: Object.assign({ t: 14, r: 14, b: 14, l: 14 }, bData.state && bData.state.ipax && bData.state.ipax.feather)
+					ipax: Object.assign({ mode: 'default', contrast: 4.5, blur: 8 }, rawIpax, {
+						boxEnabled: rawIpax.boxEnabled !== undefined ? !!rawIpax.boxEnabled : true,
+						textEnabled: inferredTextOn,
+						feather: Object.assign({ t: 14, r: 14, b: 14, l: 14 }, rawIpax.feather),
+						text: rawText
 					})
 				});
 				const b = window.EdBoxes.createBox({

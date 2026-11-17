@@ -14,6 +14,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none; }
+
 html, body {
 	margin: 0;
 	padding: 0;
@@ -91,7 +93,8 @@ html, body {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 6px 10px;
+	gap: 6px;
+	padding: 5px 8px 5px 10px;
 	font-size: 10px;
 	font-weight: 700;
 	text-transform: uppercase;
@@ -99,6 +102,26 @@ html, body {
 	color: var(--ui-text-mut);
 	background: var(--ui-panel-alt);
 	border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.ed-panel-toggle {
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--ui-text-mut);
+	cursor: pointer;
+	font-size: 11px;
+	line-height: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+}
+
+.ed-panel-toggle:hover {
+	color: var(--ui-text);
 }
 
 .ed-panel-target {
@@ -113,4 +136,8 @@ html, body {
 	display: flex;
 	flex-direction: column;
 	gap: 9px;
+}
+
+.ed-panel-body[hidden] {
+	display: none;
 }

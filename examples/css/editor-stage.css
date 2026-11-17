@@ -22,8 +22,8 @@
 }
 
 /* Stage Boxes & Stacking Context */
-.show-borders .ed-box {
-	outline: 1px dashed rgba(20, 115, 230, 0.75);
+.ed-stage.is-raw ipax-backdrop-layer {
+	display: none;
 }
 
 .ed-box {

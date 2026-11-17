@@ -1,3 +1,4 @@
+// PATH: src/2000-resolutor.js
 /**
  * ipax-backdrop / 2000-resolutor.js
  * SPDX-License-Identifier: Apache-2.0
@@ -6,17 +7,22 @@
  *
  * The browser does not expose the pixels painted behind an element. The
  * resolver rebuilds an estimate: it probes a grid of points with
- * document.elementsFromPoint, takes the elements BELOW the layer (paint
- * order), asks 'layers' what each one paints, and paints a copy of that onto
- * an off-screen canvas. Areas it cannot reproduce are flagged "unknown".
+ * document.elementsFromPoint, takes the elements BELOW the element/wrapper
+ * (paint order), merges already-computed managed layers below it directly
+ * from the compositor registry, asks 'layers' what each DOM element paints,
+ * and paints a copy onto an off-screen canvas. Areas it cannot reproduce are
+ * flagged "unknown".
  *
  * Service 'ipax-backdrop:resolver':
- *   resolve(rec, R, s, w, h, cell) -> {est, grid, why, stats}
+ *   resolve(rec, R, s, w, h, cell, active?) -> {est, grid, why, stats}
  *     rec    compositor record of the managed element
  *     R      layer rect in client px
  *     s      working scale (working px per client px)
  *     w, h   working canvas size in px
  *     cell   probe cell size in client px
+ *     active Uint8Array(nx*ny) | undefined   cells that can influence the output (1 = probe and paint).
+ *            Cells with 0 are not probed and nothing is painted there (used by the text halo, whose
+ *            layer is larger than the box). nx = ceil(R.width / cell), ny = ceil(R.height / cell).
  *   est    HTMLCanvasElement w x h, the estimated backdrop (opaque).
  *          REUSED: stored in rec.est and overwritten by the next resolve() of
  *          the same record. Callers must consume it synchronously (the pipeline
@@ -40,10 +46,14 @@
  * Opaque cut: layers below the first fully opaque known layer are invisible
  * and are ignored, together with anything unknown below them.
  *
+ * Viewport edge: cells outside the viewport are estimated from the nearest visible point of the
+ * layer (edge replication), not marked unknown. They are only "out of view" (unknown) when the whole
+ * layer is outside the viewport.
+ *
  * Known limits: elementsFromPoint is a point sample; elements with
- * pointer-events:none are not listed by the browser, so they are invisible to
- * the resolver (other managed layers are handled through the compositor
- * registry instead).
+ * pointer-events:none are not listed by the browser, so they are handled by
+ * scanning non-managed subtrees in 2100-resolutor-capas.js and through the
+ * compositor layer registry.
  */
 (function () {
 	'use strict';
@@ -88,10 +98,12 @@
 		return true;
 	}
 
-	function resolve(rec, R, s, w, h, g) {
+	function resolve(rec, R, s, w, h, g, active) {
 		const t0 = performance.now();
 		const Layers = svc('layers'), Color = svc('color'), Comp = svc('compositor');
-		const layerTag = svc('names').layerTag.toUpperCase();
+		const N_NAMES = svc('names');
+		const layerTag = N_NAMES.layerTag.toUpperCase();
+		const planeTag = (N_NAMES.planeTag || 'ipax-backdrop-plane').toUpperCase();
 		const cfg = svc('config');
 
 		// Reuse the estimate canvas of this record. Assigning width/height reallocates the backing
@@ -122,25 +134,113 @@
 
 		const nx = Math.ceil(R.width / g), ny = Math.ceil(R.height / g), N = nx * ny;
 		const V = new Uint8Array(N), done = new Uint8Array(N), sigs = new Array(N), stacks = new Array(N);
-		const cache = new Map(), why = new Set(), taint = new Set();
+		const cache = new Map(), zCache = new Map(), ownerCache = new WeakMap(), fixedCache = new WeakMap(), why = new Set(), taint = new Set();
 		const B = Math.max(1, Math.min(8, Math.floor(cfg.probeBlock === undefined ? 4 : cfg.probeBlock) || 1));
 		let probes = 0;
+
+		// Already-computed managed layers strictly below this record (sorted bottom-to-top).
+		const below = Comp.layersBelow ? Comp.layersBelow(rec, R) : [];
+		const selfRoot = rec.wrapper || rec.el;
+		const stageRoot = rec.plane ? rec.plane.parentElement : null;
+		const hostParent = selfRoot.parentElement;
+		const ownerOf = (e) => {
+			if (!Comp.ownerRecord) return null;
+			if (ownerCache.has(e)) return ownerCache.get(e);
+			const o = Comp.ownerRecord(e) || null;
+			ownerCache.set(e, o);
+			return o;
+		};
+		const isFixed = (e) => {
+			if (!e || e.nodeType !== 1 || e === document.body || e === document.documentElement) return false;
+			if (fixedCache.has(e)) return fixedCache.get(e);
+			const res = getComputedStyle(e).position === 'fixed' || isFixed(e.parentElement);
+			fixedCache.set(e, res);
+			return res;
+		};
+
+		const elemZ = (e) => {
+			if (!e || e.nodeType !== 1) return 0;
+			let v = zCache.get(e);
+			if (v !== undefined) return v;
+			if (stageRoot && e !== stageRoot && stageRoot.contains(e)) {
+				let cur = e;
+				while (cur && cur.parentElement !== stageRoot) cur = cur.parentElement;
+				if (cur) {
+					const z = parseInt(getComputedStyle(cur).zIndex, 10);
+					v = isNaN(z) ? 0 : z;
+					zCache.set(e, v);
+					return v;
+				}
+			}
+			const z = parseInt(getComputedStyle(e).zIndex, 10);
+			v = isNaN(z) ? elemZ(e.parentElement) : z;
+			zCache.set(e, v);
+			return v;
+		};
+
+		// elementsFromPoint returns nothing outside the viewport. A cell whose centre is outside it borrows the
+		// nearest visible point of the layer instead of being "unknown": otherwise the unknown mark (dilated one cell
+		// and interpolated by the kernel) leaks into the visible area as a dark veil at the edge of the screen.
+		const vw1 = document.documentElement.clientWidth - 0.5, vh1 = document.documentElement.clientHeight - 0.5;
+		const act = active && active.length === N ? active : null; // cells that can influence the output (null = all)
+		const NOSTACK = [];
 
 		// Probe one cell: layer stack, "unknown" flag and a signature (ids of the stacked layers).
 		const probe = (i, j) => {
 			const k = j * nx + i;
 			if (done[k]) return;
+			if (act && !act[k]) { done[k] = 1; sigs[k] = ''; stacks[k] = NOSTACK; V[k] = 0; return; } // not needed: no probe, nothing painted
 			probes++;
-			const px = Math.min(R.left + (i + 0.5) * g, R.right - 0.01), py = Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01);
-			const list = document.elementsFromPoint(px, py), idx = list.indexOf(rec.layer);
+			const px = Math.max(0, Math.min(R.left + (i + 0.5) * g, R.right - 0.01, vw1)), py = Math.max(0, Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01, vh1));
+			const list = document.elementsFromPoint(px, py);
 
 			const stack = [];
 			let sig = '', unk = false, cut = false;
-			if (idx < 0) { unk = true; why.add('out of view'); }
-			else {
-				for (let m = idx + 1; m < list.length && !cut; m++) {
+			let bi = below.length - 1; // iterate below layers top-to-bottom
+
+			const flushBelowAbove = (minZ) => {
+				while (bi >= 0 && !cut) {
+					const BL = below[bi];
+					if (minZ !== null && BL.z < minZ) break;
+					bi--;
+					if (!covers(BL, px, py)) continue;
+					stack.push(BL);
+					sig += BL.id + ',';
+				}
+			};
+
+			if (!list.length) {
+				unk = true;
+				why.add('out of view');
+			} else {
+				for (let m = 0; m < list.length && !cut; m++) {
 					const e = list[m];
-					if (e === document.documentElement || e === document.body || e.tagName === layerTag || (e.parentElement && e.parentElement.tagName === layerTag)) continue;
+					if (e === document.documentElement || e === document.body) continue;
+					if (e.tagName === layerTag || e.tagName === planeTag || (e.parentElement && (e.parentElement.tagName === layerTag || e.parentElement.tagName === planeTag))) continue;
+					if (e === selfRoot || selfRoot.contains(e)) continue;
+
+					const owner = ownerOf(e);
+					if (owner && owner !== rec) {
+						if (Comp.isAbove && Comp.isAbove(owner, rec)) continue;
+						// Managed elements sit above the layer plane; their corrected canvas is merged via `below`.
+						if (e === owner.el || owner.el.contains(e)) continue;
+					}
+
+					const ez = elemZ(e);
+					if (isFixed(e) && ez > rec.z) continue;
+					if (stageRoot && stageRoot.contains(e) && e !== stageRoot && ez > rec.z) continue;
+					if (!stageRoot && hostParent && hostParent.contains(e) && e !== hostParent) {
+						let sib = e;
+						while (sib && sib.parentElement !== hostParent) sib = sib.parentElement;
+						if (sib && sib !== selfRoot && sib.tagName !== layerTag) {
+							const sz = elemZ(sib);
+							if (sz > rec.z || (sz === rec.z && (selfRoot.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING))) continue;
+						}
+					}
+
+					flushBelowAbove(ez);
+					if (cut) break;
+
 					let Ls = cache.get(e);
 					if (!Ls) { Ls = Layers.layersOf(e, rec); cache.set(e, Ls); }
 					for (const L of Ls) {
@@ -152,6 +252,7 @@
 						if (L.a >= 0.999 && !L.nocut) { cut = true; break; }
 					}
 				}
+				if (!cut) flushBelowAbove(null);
 			}
 			if (unk) sig += 'u';
 			V[k] = unk ? 1 : 0; sigs[k] = sig; stacks[k] = stack; done[k] = 1;
@@ -161,25 +262,74 @@
 			for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
 				const k = j * nx + i;
 				if (done[k]) continue;
+				if (act && !act[k]) { done[k] = 1; sigs[k] = ''; stacks[k] = NOSTACK; V[k] = 0; continue; }
 				sigs[k] = sigs[k0]; stacks[k] = stacks[k0]; V[k] = V[k0]; done[k] = 1;
 			}
 		};
 
-		Comp.withHitTesting(rec, () => {
-			if (B === 1) {
-				for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) probe(i, j);
-				return;
+		if (B === 1) {
+			for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) probe(i, j);
+		} else {
+			let ai0 = 0, aj0 = 0, ai1 = nx - 1, aj1 = ny - 1;
+			if (act) {
+				ai0 = nx; aj0 = ny; ai1 = -1; aj1 = -1;
+				for (let j = 0; j < ny; j++) {
+					const row = j * nx;
+					for (let i = 0; i < nx; i++) {
+						if (!act[row + i]) continue;
+						if (i < ai0) ai0 = i;
+						if (i > ai1) ai1 = i;
+						if (j < aj0) aj0 = j;
+						if (j > aj1) aj1 = j;
+					}
+				}
 			}
-			for (let bj = 0; bj < ny; bj += B) for (let bi = 0; bi < nx; bi += B) {
-				const ie = Math.min(bi + B, nx), je = Math.min(bj + B, ny); // cells owned by this block: [bi, ie) x [bj, je)
-				const i1 = Math.min(bi + B, nx - 1), j1 = Math.min(bj + B, ny - 1); // corners: the next block's origin, clamped
-				const cx = (bi + ie - 1) >> 1, cy = (bj + je - 1) >> 1;
-				probe(bi, bj); probe(i1, bj); probe(bi, j1); probe(i1, j1); probe(cx, cy);
-				const k0 = bj * nx + bi, s0 = sigs[k0];
-				if (sigs[bj * nx + i1] === s0 && sigs[j1 * nx + bi] === s0 && sigs[j1 * nx + i1] === s0 && sigs[cy * nx + cx] === s0) fill(bi, bj, ie, je, k0);
-				else for (let j = bj; j < je; j++) for (let i = bi; i < ie; i++) probe(i, j);
+
+			let coarseDone = false;
+			if (ai1 < ai0 || aj1 < aj0) {
+				fill(0, 0, nx, ny, 0);
+				coarseDone = true;
+			} else {
+				const ci = [ai0, (ai0 + ai1) >> 1, ai1];
+				const cj = [aj0, (aj0 + aj1) >> 1, aj1];
+				let k0 = -1, uniform = true;
+				for (let qj = 0; qj < 3; qj++) {
+					for (let qi = 0; qi < 3; qi++) {
+						const ii = ci[qi], jj = cj[qj], k = jj * nx + ii;
+						if (act && !act[k]) continue;
+						probe(ii, jj);
+						if (k0 < 0) k0 = k;
+						else if (sigs[k] !== sigs[k0]) uniform = false;
+					}
+				}
+				if (uniform) {
+					fill(0, 0, nx, ny, k0 >= 0 ? k0 : 0);
+					coarseDone = true;
+				}
 			}
-		});
+
+			if (!coarseDone) {
+				for (let bj = 0; bj < ny; bj += B) for (let bi = 0; bi < nx; bi += B) {
+					const ie = Math.min(bi + B, nx), je = Math.min(bj + B, ny);
+					const i1 = Math.min(bi + B, nx - 1), j1 = Math.min(bj + B, ny - 1);
+					if (act) {
+						let any = false;
+						for (let j = bj; j < je && !any; j++) for (let i = bi; i < ie; i++) if (act[j * nx + i]) { any = true; break; }
+						if (!any) { fill(bi, bj, ie, je, bj * nx + bi); continue; }
+					}
+					const ks = [bj * nx + bi, bj * nx + i1, j1 * nx + bi, j1 * nx + i1];
+					let k0 = -1, uniform = true;
+					for (let q = 0; q < 4; q++) {
+						const k = ks[q];
+						if (act && !act[k]) continue;
+						probe(k % nx, (k / nx) | 0);
+						if (k0 < 0) k0 = k; else if (sigs[k] !== sigs[k0]) uniform = false;
+					}
+					if (uniform && k0 >= 0) fill(bi, bj, ie, je, k0);
+					else for (let j = bj; j < je; j++) for (let i = bi; i < ie; i++) probe(i, j);
+				}
+			}
+		}
 
 		// Painting. Neighbouring cells with the same layer stack are painted as one rectangle, and identical
 		// consecutive rows are merged vertically (a uniform box becomes ONE rectangle instead of one per row).

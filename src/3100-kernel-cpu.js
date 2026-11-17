@@ -2,27 +2,16 @@
  * ipax-backdrop / 3100-kernel-cpu.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, CPU backend. The reference implementation: the WebGL
- * backend (3200) must produce the same pixels.
+ * CHAPTER 3 - KERNEL, CPU backend. Reference implementation paired with 3210-kernel-webgl-shaders.js.
  *
- * Per pixel (see 3000-kernel.js for the input/output contract):
- *   1. M      feather mask, 0 at the element edge, 1 `feather` px inside.
- *   2. C      "known" weight: 1 where the backdrop estimate is trustworthy,
- *             falling to 0 inside unknown cells (bilinear over the grid).
- *   3. Image  where C > 0, move the lightness (L of OKLab, a and b fixed) of
- *             the estimated pixel just far enough to reach the contrast:
- *               default      push toward the extreme that contrasts more with
- *                            the text colour (binary search for the first
- *                            crossing, so the change is minimal);
- *               tricontrast  clamp into the luminance band where white AND
- *                            black text both pass.
- *             The result is mixed with the original by M.
- *   4. Veil   where C < 1 a translucent flat colour whose alpha guarantees the
- *             ratio against the WORST possible backdrop (black or white).
- *   Output = known image * C + veil * (1 - C), alpha-weighted.
- *
- * Text runs with another colour (colors.runs) each ask for their own
- * correction; the strongest run weight at a pixel blends the two solutions.
+ * Composition pipeline per pixel:
+ *   1. Mb       box mask (Euclidean feather inside box, 0 outside)
+ *      Mh       calibrated glyph contour mask (0 without --ipax-text)
+ *      mScreen  screen(Mb, Mh) = Mb + Mh - Mb * Mh
+ *   2. Blur     single-pass estBlur mixed by mScreen (if boxBlur === textBlur)
+ *               or max(Mb * boxBlur / maxBlur, Mh * textBlur / maxBlur)
+ *   3. OKLab    continuous sequential lightness adaptation: L0 --(mScreen)--> L1 --(Mh)--> L2
+ *   4. Veil     worst-case contrast veil weighted by max(mScreen * alBox, Mh * alText)
  *
  * Service 'ipax-backdrop:kernel-cpu': available(), render(input)
  */
@@ -39,21 +28,49 @@
 		return (gv(ci, cj) * (1 - tx) + gv(ci + 1, cj) * tx) * (1 - ty) + (gv(ci, cj + 1) * (1 - tx) + gv(ci + 1, cj + 1) * tx) * ty;
 	}
 
+	function maskAt(m, rx, ry) {
+		const data = m.data, mw = m.mw, mh = m.mh, cs = m.cs;
+		let fx = rx / cs - 0.5, fy = ry / cs - 0.5;
+		if (fx < 0) fx = 0; else if (fx > mw - 1) fx = mw - 1;
+		if (fy < 0) fy = 0; else if (fy > mh - 1) fy = mh - 1;
+		const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j;
+		const i1 = i + 1 < mw ? i + 1 : i, j1 = j + 1 < mh ? j + 1 : j;
+		const a = data[j * mw + i], b = data[j * mw + i1], c = data[j1 * mw + i], d = data[j1 * mw + i1];
+		return ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty) / 255;
+	}
+
 	function render(input) {
 		const C = svc('color'), K = svc('contrast');
 		const LUT = C.LUT, clamp01 = C.clamp01, smooth = C.smooth, lum = C.luminance, toSrgb = C.toSrgb255, cr = K.ratio;
 		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
+		const ox = input.ox || 0, oy = input.oy || 0;
+		const halo = input.halo && input.halo.mask ? input.halo : null, haloOn = !!halo;
+		const boxCover = input.boxCover !== false;
+		const infl = input.infl > 6 ? input.infl : 6;
+		const eps = 1 / s;
 
 		let pix = null, blurPix = null, tainted = false;
-		if (est) { 
-			try { 
-				pix = est.getContext('2d').getImageData(0, 0, w, h).data; 
+		if (est) {
+			try {
+				pix = est.getContext('2d').getImageData(0, 0, w, h).data;
 				if (estBlur) blurPix = estBlur.getContext('2d').getImageData(0, 0, w, h).data;
-			} catch (e) { tainted = true; } 
+			} catch (e) { tainted = true; }
 		}
 
 		const out = new Uint8ClampedArray(w * h * 4);
-		const tri = params.mode === 'tricontrast', ratio = params.ratio, rS = K.solveRatio(ratio);
+		const triB = params.mode === 'tricontrast';
+		const ratio = params.ratio, rS = K.solveRatio(ratio), bypassB = K.isBypass(ratio);
+		const rH = haloOn ? halo.ratio : ratio, rSH = K.solveRatio(rH), bypassH = !haloOn || K.isBypass(rH);
+		const triH = haloOn ? ((halo.mode || params.mode) === 'tricontrast') : triB;
+		const shared = haloOn && !!halo.shared;
+
+		const boxBlur = input.boxBlur !== undefined ? input.boxBlur : (params.blur || 0);
+		const textBlur = input.textBlur !== undefined ? input.textBlur : (haloOn ? (halo.blur || 0) : 0);
+		const maxBlur = input.maxBlur !== undefined ? input.maxBlur : Math.max(boxBlur, textBlur);
+		const boxBlurRatio = maxBlur > 0 ? boxBlur / maxBlur : 0;
+		const textBlurRatio = maxBlur > 0 ? textBlur / maxBlur : 0;
+		const sameBlur = Math.abs(boxBlur - textBlur) < 1e-4;
+
 		const fParam = params.feather;
 		const f = (typeof fParam === 'object' && fParam !== null)
 			? fParam
@@ -63,27 +80,27 @@
 
 		const runs = colors.runs.slice(0, svc('limits').maxRuns);
 		const pcs = [K.prepareColor(colors.base, rS)].concat(runs.map((r) => K.prepareColor(r.c, rS)));
+		const pcsH = (haloOn && !shared) ? [K.prepareColor(colors.base, rSH)].concat(runs.map((r) => K.prepareColor(r.c, rSH))) : pcs;
 		const band = K.band(ratio), tv = K.bandVeil(band);
+		const bandH = haloOn ? K.band(rH) : band, tvH = haloOn ? K.bandVeil(bandH) : tv;
 		const ok = [0, 0, 0], lin = [0, 0, 0];
 
-		/** Default mode: lightness that reaches rS against text colour `pc`, minimal change. */
-		const defL = (L0, A, B, fr, fg, fb, pc) => {
-			if (cr(pc.yT, lum(fr, fg, fb)) >= rS) return L0;
+		const defL = (L0, A, B, fr, fg, fb, pc, rs) => {
+			if (cr(pc.yT, lum(fr, fg, fb)) >= rs) return L0;
 			C.oklabToLin(pc.pkL, A, B, lin);
-			if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) < rS) return pc.pkL; // unreachable: pin at the extreme
+			if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) < rs) return pc.pkL;
 			let lo = L0, hi = pc.pkL;
 			for (let n = 0; n < 9; n++) {
 				const mid = (lo + hi) / 2;
 				C.oklabToLin(mid, A, B, lin);
-				if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) >= rS) hi = mid; else lo = mid;
+				if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) >= rs) hi = mid; else lo = mid;
 			}
 			return hi;
 		};
 
-		/** Tricontrast: lightness of the nearest band edge, or L0 if already inside. */
-		const triL = (L0, A, B, Y0) => {
-			if (Y0 >= band.lo && Y0 <= band.hi) return L0;
-			const up = Y0 < band.lo, target = up ? band.lo : band.hi;
+		const triL = (L0, A, B, Y0, bd) => {
+			if (Y0 >= bd.lo && Y0 <= bd.hi) return L0;
+			const up = Y0 < bd.lo, target = up ? bd.lo : bd.hi;
 			let lo = up ? L0 : 0, hi = up ? 1 : L0;
 			for (let n = 0; n < 13; n++) {
 				const mid = (lo + hi) / 2;
@@ -93,29 +110,53 @@
 			return (lo + hi) / 2;
 		};
 
+		const solve = (L0, A, B, fr, fg, fb, rs, bd, isTri, pcList, kk, wk) => {
+			if (isTri) return triL(L0, A, B, lum(fr, fg, fb), bd);
+			let Lt = defL(L0, A, B, fr, fg, fb, pcList[0], rs);
+			if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcList[kk + 1], rs) - Lt);
+			return Lt;
+		};
+
 		let minV = Infinity, under = 0, nI = 0, nV = 0;
 		for (let y = 0; y < h; y++) {
-			const ry = (y + 0.5) / s;
-			const mY = hasFeather ? Math.min(
-				fT > 0 ? clamp01(ry / fT) : 1,
-				fB > 0 ? clamp01((H - ry) / fB) : 1
-			) : 1;
+			const ry = (y + 0.5) / s, by = ry - oy;
+			const inY = by > -eps && by < H + eps;
+			const uY = (inY && hasFeather) ? Math.max(
+				fT > 0 ? (fT - by) / fT : 0,
+				fB > 0 ? (by - (H - fB)) / fB : 0,
+				0
+			) : 0;
 
 			for (let x = 0; x < w; x++) {
-				const q = (y * w + x) * 4, rx = (x + 0.5) / s;
-				const M = hasFeather ? smooth(Math.min(
-					mY,
-					fL > 0 ? clamp01(rx / fL) : 1,
-					fR > 0 ? clamp01((W - rx) / fR) : 1
-				)) : 1;
+				const q = (y * w + x) * 4, rx = (x + 0.5) / s, bx = rx - ox;
+				const inBox = inY && bx > -eps && bx < W + eps;
+				let Mb = 0;
+				if (inBox && boxCover) {
+					if (hasFeather) {
+						const uX = Math.max(
+							fL > 0 ? (fL - bx) / fL : 0,
+							fR > 0 ? (bx - (W - fR)) / fR : 0,
+							0
+						);
+						const r = (uX > 0 && uY > 0) ? Math.sqrt(uX * uX + uY * uY) : (uX > uY ? uX : uY);
+						Mb = smooth(clamp01(1 - r));
+					} else {
+						Mb = 1;
+					}
+				}
+				const Mh = haloOn ? maskAt(halo.mask, rx, ry) : 0;
+				const covers = inBox && boxCover;
+				if (!covers && Mh <= 0) continue;
+				const cov = covers ? 1 : Mh;
+				const mScreen = Mb + Mh - Mb * Mh;
 				const known = pix ? 1 - veilFrac(grid, rx, ry) : 0;
 
 				let wk = 0, kk = -1;
-				if (!tri) {
+				if (!triB || !triH) {
 					for (let k = 0; k < runs.length; k++) {
 						const r = runs[k];
 						const d = Math.hypot(Math.max(r.x0 - rx, 0, rx - r.x1), Math.max(r.y0 - ry, 0, ry - r.y1));
-						const wg = smooth(clamp01(1 - d / 6));
+						const wg = smooth(clamp01(1 - d / infl));
 						if (wg > wk) { wk = wg; kk = k; }
 					}
 				}
@@ -123,49 +164,62 @@
 				let ir = 0, ig = 0, ib = 0;
 				if (known > 0) {
 					let fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
-					
-					if (blurPix) {
-						const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
-						fr = fr + M * (br - fr);
-						fg = fg + M * (bg - fg);
-						fb = fb + M * (bb - fb);
+
+					if (blurPix && maxBlur > 0) {
+						const mBlur = sameBlur ? mScreen : Math.max(Mb * boxBlurRatio, Mh * textBlurRatio);
+						if (mBlur > 0) {
+							const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
+							fr = fr + mBlur * (br - fr);
+							fg = fg + mBlur * (bg - fg);
+							fb = fb + mBlur * (bb - fb);
+						}
 					}
-					
-					if (K.isBypass(ratio)) {
+
+					if (bypassB && bypassH) {
 						ir = toSrgb(fr); ig = toSrgb(fg); ib = toSrgb(fb);
 					} else {
 						C.linToOklab(fr, fg, fb, ok);
 						const L0 = ok[0], A = ok[1], B = ok[2];
-						let Lt;
-						if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
-						else {
-							Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
-							if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+						let L1 = L0;
+						if (!bypassB && mScreen > 0) {
+							const LtB = solve(L0, A, B, fr, fg, fb, rS, band, triB, pcs, kk, wk);
+							L1 = clamp01(L0 + mScreen * (LtB - L0));
 						}
-						C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
+						let L2 = L1;
+						if (!bypassH && Mh > 0) {
+							C.oklabToLin(L1, A, B, lin);
+							const LtH = solve(L1, A, B, lin[0], lin[1], lin[2], rSH, bandH, triH, pcsH, kk, wk);
+							const hk = covers ? Mh : 1;
+							L2 = clamp01(L1 + hk * (LtH - L1));
+						}
+						C.oklabToLin(L2, A, B, lin);
 						ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
-						if (M >= 0.999 && known >= 0.999) {
+						if (Mb >= 0.999 && known >= 0.999 && !bypassB) {
 							const Y = lum(lin[0], lin[1], lin[2]);
-							const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
+							const v = triB ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
 							if (v < minV) minV = v;
 							if (v < ratio - 1e-6) under++;
 							nI++;
 						}
 					}
-				} else if (M >= 0.999) nV++;
+				} else if (Mb >= 0.999) nV++;
 
-				const pv = tri ? tv : pcs[wk > 0.5 ? kk + 1 : 0];
-				const bypass = K.isBypass(ratio);
-				const wV = bypass ? 0 : (1 - known) * pv.al * M;
-				const aO = known + wV;
+				const vi = wk > 0.5 ? kk + 1 : 0;
+				let wB = 0, vB = 0, wH = 0, vH = 0;
+				if (!bypassB && mScreen > 0) { const pv = triB ? tv : pcs[vi]; wB = mScreen * pv.al; vB = pv.vc; }
+				if (!bypassH && Mh > 0) { const pv = triH ? tvH : pcsH[vi]; wH = Mh * pv.al; vH = pv.vc; }
+				const wm = wH > wB ? wH : wB, vcv = wH > wB ? vH : vB;
+				const wV = (1 - known) * wm;
+				const kc = known * cov;
+				const aO = kc + wV;
 				if (aO <= 0) continue;
-				out[q] = (known * ir + wV * pv.vc) / aO;
-				out[q + 1] = (known * ig + wV * pv.vc) / aO;
-				out[q + 2] = (known * ib + wV * pv.vc) / aO;
+				out[q] = (kc * ir + wV * vcv) / aO;
+				out[q + 1] = (kc * ig + wV * vcv) / aO;
+				out[q + 2] = (kc * ib + wV * vcv) / aO;
 				out[q + 3] = aO * 255;
 			}
 		}
-		const inf = tri ? !band.ok : pcs[0].pkR < ratio;
+		const inf = triB ? !band.ok : pcs[0].pkR < ratio;
 		return { source: new ImageData(out, w, h), stats: { min: nI ? minV : null, under, nI, nV, inf }, tainted };
 	}
 

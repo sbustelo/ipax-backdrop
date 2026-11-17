@@ -1,3 +1,4 @@
+// PATH: src/2100-resolutor-capas.js
 /**
  * ipax-backdrop / 2100-resolutor-capas.js
  * SPDX-License-Identifier: Apache-2.0
@@ -8,22 +9,23 @@
  * bottom) the resolver can reproduce on a canvas. Supported:
  *   'col'  background-color, with alpha and inherited opacity
  *   'img'  url() background images and <img> elements (size, position, repeat)
- *   'lay'  the already-computed layer of ANOTHER managed element
  * Everything else becomes an 'unk' layer carrying the reason. The resolver
  * answers "unknown" for any area where an 'unk' layer is visible, and the
  * kernel covers that area with a translucent veil instead of guessing.
+ *
+ * Already-computed managed layers ('lay') are composed directly by
+ * 2000-resolutor.js via compositor.layersBelow(), so container scans never
+ * depend on per-box state and can be cached across all boxes in the frame.
  *
  * Unknown reasons: transform, filter, mix-blend-mode, backdrop-filter (on a
  * non-managed element), pseudo-element with a background, gradient,
  * unsupported background, attachment/origin, image not loaded, geometry,
  * color, object-fit.
  *
- * FRAME CACHE (v0.1.05): between beginFrame() and endFrame() the descriptors of
+ * FRAME CACHE (v0.1.05+): between beginFrame() and endFrame() the descriptors of
  * every NON-managed element, and the inherited-risk chain of every ancestor, are
- * computed once and shared by all managed elements. In a grid where hundreds of
- * boxes sit on the same cells, parents and page wrappers are style-queried once per
- * frame instead of once per box. Managed elements are never cached (their 'lay'
- * layer changes while the frame is processed). Without beginFrame() nothing is cached.
+ * computed once and shared by all managed elements. Subtrees belonging to managed
+ * elements or their stacking wrappers are pruned during pointer-events:none scans.
  *
  * Service 'ipax-backdrop:layers':
  *   layersOf(el, selfRec)   -> descriptor[]   (selfRec is skipped as "own layer")
@@ -63,6 +65,15 @@
 		catch (e) { return true; }
 	};
 
+	/** Pure 2D scale/translation matrix (no rotation or skew) used by zoomed stage containers. */
+	function isPureScaleTransform(tr) {
+		if (!tr || tr === 'none') return true;
+		const m = /^matrix\(\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,/.exec(tr);
+		if (!m) return false;
+		const a = +m[1], b = +m[2], c = +m[3], d = +m[4];
+		return Math.abs(b) < 1e-6 && Math.abs(c) < 1e-6 && a > 0 && d > 0;
+	}
+
 	/** Effects that cannot be reproduced, plus the opacity accumulated through ancestors (cached per frame). */
 	function riskOf(n) {
 		if (!n || n.nodeType !== 1) return NO_RISK;
@@ -71,19 +82,22 @@
 		const Comp = svc('compositor');
 		const c = getComputedStyle(n), parent = riskOf(n.parentElement);
 		let unk = null;
-		if (c.transform !== 'none') unk = 'transform';
-		else if (c.filter !== 'none') unk = 'filter';
-		else if (c.mixBlendMode !== 'normal') unk = 'mix-blend-mode';
+		if (c.transform !== 'none') {
+			const stageZoom = Comp.isStageOrAncestor && Comp.isStageOrAncestor(n) && isPureScaleTransform(c.transform);
+			if (!stageZoom) unk = 'transform';
+		}
+		if (!unk && c.filter !== 'none') unk = 'filter';
+		else if (!unk && c.mixBlendMode !== 'normal') unk = 'mix-blend-mode';
 		// A managed element is expected to have the author's backdrop-filter (that is the glass blur).
-		else if ((c.backdropFilter || c.webkitBackdropFilter || 'none') !== 'none' && !Comp.recordFor(n)) unk = 'backdrop-filter';
+		else if (!unk && (c.backdropFilter || c.webkitBackdropFilter || 'none') !== 'none' && !Comp.recordFor(n)) unk = 'backdrop-filter';
 		// The nearest ancestor that carries an effect wins, as before.
 		r = { unk: unk || parent.unk, op: (+c.opacity) * parent.op };
 		if (riskCache) riskCache.set(n, r);
 		return r;
 	}
 
-	function build(e, selfRec) {
-		const G = svc('css-geometry'), Color = svc('color'), Comp = svc('compositor');
+	function build(e) {
+		const G = svc('css-geometry'), Color = svc('color');
 		const out = [], risk = riskOf(e), mk = (o) => { o.id = ++uid; return o; };
 		if (risk.unk) return [mk({ k: 'unk', why: risk.unk })];
 
@@ -96,7 +110,14 @@
 		}
 
 		const cs = getComputedStyle(e), r = e.getBoundingClientRect();
-		const pa = { x: r.left + e.clientLeft, y: r.top + e.clientTop, w: e.clientWidth, h: e.clientHeight };
+		const ow = e.offsetWidth, oh = e.offsetHeight;
+		const sx = ow > 0 ? r.width / ow : 1, sy = oh > 0 ? r.height / oh : 1;
+		const pa = {
+			x: r.left + e.clientLeft * sx,
+			y: r.top + e.clientTop * sy,
+			w: e.clientWidth * sx,
+			h: e.clientHeight * sy
+		};
 
 		if (e.tagName === 'IMG') {
 			if (!(e.complete && e.naturalWidth)) out.push(mk({ k: 'unk', why: 'image not loaded' }));
@@ -125,38 +146,40 @@
 		if (!c) out.push(mk({ k: 'unk', why: 'color' }));
 		else if (c[3] > 0) out.push(mk({ k: 'col', c, a: c[3] * risk.op, r }));
 
-		// The layer a managed element has underneath itself paints below its own background.
-		// If the managed element is in Bypass mode (contrast 1, blur 0), its canvas is cleared (width=0).
-		// We must not push an empty canvas, so elementsFromPoint can hit the real DOM elements (like .ed-box-bg) underneath.
-		const rg = Comp.recordFor(e);
-		if (rg && rg.ready && rg !== selfRec && rg.cv.width > 0) out.push({ id: 1e6 + rg.id, k: 'lay', cv: rg.cv, r: rg.layer.getBoundingClientRect(), a: 1, nocut: true });
 		return out;
 	}
 
 	function layersOf(e, selfRec) {
-		const Comp = svc('compositor'), layerTag = svc('names').layerTag.toUpperCase();
+		const Comp = svc('compositor'), N = svc('names');
+		const layerTag = N.layerTag.toUpperCase();
+		const planeTag = (N.planeTag || 'ipax-backdrop-plane').toUpperCase();
 		const isAncestor = !!(selfRec && e.contains(selfRec.el));
-		// Managed elements depend on selfRec and on what has been drawn so far: never cached.
-		let cacheable = frame !== null && !Comp.recordFor(e) && !isAncestor;
+		const isManaged = !!Comp.recordFor(e);
+		const isWrap = !!(Comp.isWrapper && Comp.isWrapper(e));
+		const cacheable = frame !== null && !isManaged && !isWrap && !isAncestor;
 		if (cacheable) { const hit = frame.get(e); if (hit) return hit; }
 
-		let out = [];
-		if (!isAncestor) {
-			try {
-				const descendants = e.querySelectorAll('*');
-				for (let i = descendants.length - 1; i >= 0; i--) {
-					const d = descendants[i];
-					if (d.tagName === layerTag || (d.parentElement && d.parentElement.tagName === layerTag)) continue;
-					if (Comp.recordFor(d)) cacheable = false;
-					const cs = getComputedStyle(d);
-					if (cs.pointerEvents === 'none' && cs.display !== 'none' && parseFloat(cs.opacity) > 0) {
-						out = out.concat(build(d, selfRec));
-					}
+		const out = [];
+		const scanPointerNone = (root) => {
+			for (let d = root.firstElementChild; d; d = d.nextElementSibling) {
+				if (d.tagName === layerTag || d.tagName === planeTag) continue;
+				if (Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d))) continue;
+				const cs = getComputedStyle(d);
+				if (cs.display === 'none' || parseFloat(cs.opacity) <= 0) continue;
+				scanPointerNone(d);
+				if (cs.pointerEvents === 'none') {
+					const items = build(d);
+					for (let i = 0; i < items.length; i++) out.push(items[i]);
 				}
-			} catch (err) {}
+			}
+		};
+
+		if (!isAncestor) {
+			try { scanPointerNone(e); } catch (err) {}
 		}
 
-		out = out.concat(build(e, selfRec));
+		const own = build(e);
+		for (let i = 0; i < own.length; i++) out.push(own[i]);
 		if (cacheable) frame.set(e, out);
 		return out;
 	}

@@ -5,15 +5,12 @@
  * CHAPTER 9 - PUBLIC API. The only service meant for library users.
  *
  *   const api = window.j0.get('ipax-backdrop');
- *   api.version      '0.1.0'
- *   api.config       live configuration object (backend, cellSize, maxPixels, autoStart)
+ *   api.version      '0.1.10'
+ *   api.config       live configuration object
  *   api.start()      scan the page and start (done automatically unless config.autoStart is false)
  *   api.stop()       remove every layer and stop
  *   api.refresh()    re-scan (new elements or rules) and recompute
  *   api.backend()    'webgl' | 'cpu' | '' (empty until the first render)
- *
- * Listen to events with window.j0.bus.on('ipax-backdrop:updated', fn), etc.
- * (list in 0010-nucleo.js).
  */
 (function () {
 	'use strict';
@@ -22,7 +19,7 @@
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const api = {
-		version: '0.1.05',
+		version: '0.1.10',
 		start: () => svc('orchestrator').start(),
 		stop: () => svc('orchestrator').stop(),
 		refresh: () => svc('orchestrator').refresh(),

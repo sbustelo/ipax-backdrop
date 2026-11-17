@@ -1,5 +1,37 @@
 # Changelog
 
+# Changelog
+
+## 0.1.10 • 17/nov/2026
+
+- **Decoupled Dual-Family CSS API (`--ipax-backdrop`, `--ipax-text`, `--ipax-mode`):**
+  - Splits container contrast/blur (`--ipax-backdrop`) and glyph-contour contrast/blur (`--ipax-text`) into independent, composable CSS families with shorthand + longhand cascade support and a shared `--ipax-mode` (`default | tricontrast`) property.
+  - Supports explicit WCAG ratios (`4.5` or `4.5:1`) as well as APCA `Lc` inputs (`90Lc` or bare numbers `> 15`), emitting a `warning` and applying a perceptual power-law WCAG fallback (`1..15:1`, anchored to `#272727` black-level saturation) until APCA licensing is enabled.
+- **Calibrated Per-Word Glyph Contour Mask (`--ipax-text`):**
+  - Replaces the rectangular line-box halo of `0.1.06` with a glyph-fitted mask rasterized per word via `Range.getClientRects()`, `TextMetrics` width/baseline calibration, and `devicePixelRatio` scaling, eliminating hard boxes around text.
+  - Supports `x` and `y` offsets, `halo` diffusion radius, dual-unit `spread` (`%` internal plateau within `halo` or `px` additive dilation outside `halo` like `box-shadow`), and per-glyph background image `blur`.
+- **Unified Single-Pass Blur & Sequential OKLab Composition:**
+  - Composes container mask $M_b$ and glyph mask $M_g$ via screen union $M_{\text{screen}} = M_b + M_g - M_b M_g$, executes a single background blur pass at $R_{\max} = \max(\text{box-blur}, \text{text-blur})$, and transitions lightness continuously $L_0 \xrightarrow{M_{\text{screen}}} L_1 \xrightarrow{M_g} L_2$ across both CPU (`3100`) and WebGL (`3200`/`3210`) kernels.
+  - Short-circuits container distance math and outside-glyph pixel work when `--ipax-backdrop` is inactive (`--ipax-text`-only mode).
+- **Coarse-to-Fine 3×3 Hierarchical Probing & Scroll Convergence (`2000-resolutor.js`, `0200-orquestador.js`):**
+  - Evaluates a 3×3 coarse grid (9 samples) across the active region before subdividing into `probeBlock` × `probeBlock` blocks (using 4 shared corner probes per block instead of 5), scales `localStep` smoothly on large elements, and memoizes `ownerRecord` and `position: fixed` ancestor checks per resolve.
+  - Excludes `position: fixed` overlays above the element's `z-index` from hit-testing and adds a 130 ms `scrollEndTimer` flush so throttled boxes converge cleanly once scrolling stops.
+- **Lucid Glass Editor Inspector Refinement (`examples/editor.html`):**
+  - Adds a single-row `Position` (`X`, `Y`, `W`, `H`) panel, collapsible panel carets, independent enable/collapse toggles for `Container (--ipax-backdrop)` and `Glyph Contour (--ipax-text)`, Material Symbols iconography with font load-source status, horizontal label scrubbing, and instant delegated tooltips.
+
+## 0.1.06 • 15/nov/2026
+
+- **Initial Text-Halo Prototype & Euclidean Feathering:**
+  - Introduced an early line-box `--ipax-backdrop-text-halo` prototype (superseded in `0.1.10` by the glyph-calibrated `--ipax-text` contour engine).
+- **Performance & Local Text Invalidation:**
+  - Skips DOM probing and kernel solving on cells/pixels outside both the element box and the active halo mask.
+  - Extends `MutationObserver` to `characterData` so editing text inside an existing box invalidates only that element locally instead of bumping the global epoch.
+  - Packs WebGL shader uniforms into `vec4` arrays to reduce uniform slot consumption, and adds `stages.read` and `halo: { ext, reach }` to the `ipax-backdrop:updated` payload.
+- **Euclidean Box Feathering:**
+  - Replaces the L∞ (`min`) edge ramp calculation in both CPU (`3100`) and WebGL (`3210`) kernels with normalized Euclidean distance, eliminating diagonal diamond ridges and producing smooth circular/elliptical corner falloffs while preserving sharp 90° edges on sides with `feather: 0`.
+- **Viewport-Edge Probe Fix:**
+  - Clamps DOM probe coordinates at viewport boundaries so elements positioned slightly past an edge (e.g. `y = -1`) do not mark boundary cells as unknown and bleed a dark gradient veil into the visible area.
+
 ## 0.1.05 • 14/nov/2026
 
 - **Startup & Invalidation Overhaul (fewer redundant passes):**
@@ -127,4 +159,4 @@
 
 ---
 
-_IPAX Backdrop v0.1.05 • 2026-11-14 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

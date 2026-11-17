@@ -1,35 +1,38 @@
+// PATH: src/1000-lector.js
 /**
  * ipax-backdrop / 1000-lector.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 1 - READER: turns CSS into parameters. It never touches pixels.
+ * CHAPTER 1 - READER: turns CSS custom properties into solver parameters.
+ *
+ * Supports two independent, composable CSS families plus shared mode:
+ *   Container: --ipax-backdrop (shorthand) & --ipax-backdrop-{contrast,blur,feather,feather-*,mode}
+ *   Text:      --ipax-text (shorthand)     & --ipax-text-{x,y,halo,spread,contrast,blur,mode}
+ *   Shared:    --ipax-mode (default | tricontrast)
  *
  * Service 'ipax-backdrop:reader':
- *   scan()            -> Element[]   elements that declare --ipax-backdrop-* in a
- *                                    style rule, plus elements carrying the
- *                                    data-ipax-backdrop attribute.
- *   readParams(el)    -> {ok, reason, ratio, mode, feather, color}
- *
- * Values are read with getComputedStyle, so the normal CSS cascade, media
- * queries, inheritance and inline styles all apply.
- *
- * Stylesheets that cannot be read (cross-origin without CORS, or any linked
- * file opened from file://) are skipped with a warning. Their elements are
- * still found if they carry the data-ipax-backdrop attribute.
+ *   scan()         -> Element[]
+ *   readParams(el) -> {ok, reason, warnings, ratio, mode, feather, blur, text, color, ...}
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
+	const MODES = new Set(['default', 'tricontrast']);
 
 	function scan() {
 		const N = svc('names'), sels = new Set();
 		let unreadable = 0;
+		const hasProp = (txt) => (
+			txt.indexOf(N.boxShorthand) >= 0 ||
+			txt.indexOf(N.textShorthand) >= 0 ||
+			txt.indexOf(N.modeProp) >= 0
+		);
 		const walk = (rules) => {
 			for (const r of rules) {
-				if (r.cssRules && !r.selectorText) walk(r.cssRules); // @media, @supports, @layer...
-				else if (r.selectorText && r.cssText.indexOf(N.propPrefix) >= 0) sels.add(r.selectorText);
+				if (r.cssRules && !r.selectorText) walk(r.cssRules);
+				else if (r.selectorText && hasProp(r.cssText)) sels.add(r.selectorText);
 			}
 		};
 		for (const sh of document.styleSheets) {
@@ -37,49 +40,36 @@
 		}
 		const found = new Set();
 		sels.forEach((s) => { try { document.querySelectorAll(s).forEach((e) => found.add(e)); } catch (e) { /* invalid selector */ } });
-		document.querySelectorAll('[' + N.markerAttr + ']').forEach((e) => found.add(e));
-		if (unreadable) window.j0.bus.emit('ipax-backdrop:warning', { message: unreadable + ' stylesheet(s) could not be read (cross-origin or file://). Elements declared only there need the ' + N.markerAttr + ' attribute.' });
+		document.querySelectorAll('[' + N.markerAttr + '], [' + N.textMarkerAttr + ']').forEach((e) => found.add(e));
+		if (unreadable) window.j0.bus.emit('ipax-backdrop:warning', { message: unreadable + ' stylesheet(s) could not be read (cross-origin or file://). Elements declared only there need ' + N.markerAttr + ' or ' + N.textMarkerAttr + '.' });
 		return Array.from(found).filter((el) => el.parentNode && !el.closest(N.layerTag));
 	}
 
-	function parseFeather(shorthand, topStr, rightStr, bottomStr, leftStr) {
-		let t = 0, r = 0, b = 0, l = 0;
-		if (shorthand) {
-			const tokens = shorthand.split(/[\s,]+/).filter(Boolean);
-			const vals = [];
-			for (let i = 0; i < tokens.length; i++) {
-				const num = parseFloat(tokens[i]);
-				if (!isNaN(num)) vals.push(Math.max(0, num));
-			}
-			if (vals.length === 1) {
-				t = r = b = l = vals[0];
-			} else if (vals.length === 2) {
-				t = b = vals[0];
-				r = l = vals[1];
-			} else if (vals.length === 3) {
-				t = vals[0];
-				r = l = vals[1];
-				b = vals[2];
-			} else if (vals.length >= 4) {
-				t = vals[0];
-				r = vals[1];
-				b = vals[2];
-				l = vals[3];
-			}
-		}
+	function parseLengthPx(raw, rootFontPx) {
+		const s = String(raw || '').trim();
+		if (s === '0') return 0;
+		const m = /^([+-]?(?:\d+\.?\d*|\.\d+))(px|rem|em)$/i.exec(s);
+		if (!m) return null;
+		const n = parseFloat(m[1]);
+		const u = m[2].toLowerCase();
+		if (u === 'px') return n;
+		return n * (rootFontPx || 16);
+	}
 
-		const override = (valStr, current) => {
-			if (!valStr) return current;
-			const num = parseFloat(valStr);
-			return (!isNaN(num) && num >= 0) ? num : current;
-		};
+	function parseLengthOrBarePx(raw, rootFontPx) {
+		const len = parseLengthPx(raw, rootFontPx);
+		if (len !== null) return len;
+		const s = String(raw || '').trim();
+		if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) return parseFloat(s);
+		return null;
+	}
 
-		return {
-			top: override(topStr, t),
-			right: override(rightStr, r),
-			bottom: override(bottomStr, b),
-			left: override(leftStr, l)
-		};
+	function expandSides(vals) {
+		if (!vals.length) return { top: 0, right: 0, bottom: 0, left: 0 };
+		if (vals.length === 1) return { top: vals[0], right: vals[0], bottom: vals[0], left: vals[0] };
+		if (vals.length === 2) return { top: vals[0], right: vals[1], bottom: vals[0], left: vals[1] };
+		if (vals.length === 3) return { top: vals[0], right: vals[1], bottom: vals[2], left: vals[1] };
+		return { top: vals[0], right: vals[1], bottom: vals[2], left: vals[3] };
 	}
 
 	function parsePerf(s, def) {
@@ -96,25 +86,187 @@
 		return isNaN(v) ? def : Math.max(0, v);
 	}
 
+	function parseBoxParams(cs, sharedMode, rootFontPx, hasTextDecl) {
+		const N = svc('names'), K = svc('contrast');
+		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
+		const sh = cs.getPropertyValue(N.boxShorthand).trim();
+		const cLong = get('contrast');
+		const bLong = get('blur');
+		const fLong = get('feather');
+		const ftLong = get('feather-top'), frLong = get('feather-right'), fbLong = get('feather-bottom'), flLong = get('feather-left');
+		const mLong = get('mode').toLowerCase();
+
+		const hasBoxDecl = !!(sh || cLong || bLong || fLong || ftLong || frLong || fbLong || flLong);
+		const warnings = [];
+		let ok = true, reason = '';
+		let ratio = (!hasBoxDecl && hasTextDecl) ? 1 : 4.5;
+		let blur = 0;
+		let feather = { top: 0, right: 0, bottom: 0, left: 0 };
+		let mode = sharedMode;
+
+		if (sh) {
+			ratio = 4.5;
+			const lengths = [];
+			for (const tok of sh.split(/[\s,]+/).filter(Boolean)) {
+				const low = tok.toLowerCase();
+				if (MODES.has(low)) { mode = low; continue; }
+				const len = parseLengthPx(tok, rootFontPx);
+				if (len !== null) { lengths.push(Math.max(0, len)); continue; }
+				const c = K.parseContrast(tok, 4.5);
+				if (!c.ok) { ok = false; reason = c.reason; }
+				else {
+					ratio = c.ratio;
+					if (c.warning) warnings.push(c.warning);
+				}
+			}
+			if (lengths.length >= 1) blur = lengths[0];
+			if (lengths.length >= 2) feather = expandSides(lengths.slice(1, 5));
+		}
+
+		if (cLong) {
+			const c = K.parseContrast(cLong, 4.5);
+			if (!c.ok) { ok = false; reason = c.reason; }
+			else {
+				ratio = c.ratio;
+				if (c.warning) warnings.push(c.warning);
+			}
+		}
+
+		if (bLong) {
+			const b = parseLengthOrBarePx(bLong, rootFontPx);
+			if (b !== null) blur = Math.max(0, b);
+		}
+
+		if (fLong) {
+			const sides = [];
+			for (const tok of fLong.split(/[\s,]+/).filter(Boolean)) {
+				const v = parseLengthOrBarePx(tok, rootFontPx);
+				if (v !== null) sides.push(Math.max(0, v));
+			}
+			if (sides.length) feather = expandSides(sides.slice(0, 4));
+		}
+
+		const overrideSide = (raw, cur) => {
+			if (!raw) return cur;
+			const v = parseLengthOrBarePx(raw, rootFontPx);
+			return (v !== null && v >= 0) ? v : cur;
+		};
+		feather.top = overrideSide(ftLong, feather.top);
+		feather.right = overrideSide(frLong, feather.right);
+		feather.bottom = overrideSide(fbLong, feather.bottom);
+		feather.left = overrideSide(flLong, feather.left);
+
+		if (MODES.has(mLong)) mode = mLong;
+
+		return { ok, reason, warnings, ratio, blur, feather, mode };
+	}
+
+	function parseTextParams(cs, sharedMode, rootFontPx) {
+		const N = svc('names'), K = svc('contrast');
+		const get = (n) => cs.getPropertyValue(N.textPrefix + n).trim();
+		const sh = cs.getPropertyValue(N.textShorthand).trim();
+		const xLong = get('x'), yLong = get('y'), hLong = get('halo'), sLong = get('spread');
+		const cLong = get('contrast'), bLong = get('blur'), mLong = get('mode').toLowerCase();
+
+		const hasDecl = !!(sh || xLong || yLong || hLong || sLong || cLong || bLong || mLong);
+		const warnings = [];
+		let ok = true, reason = '';
+		const out = {
+			on: false,
+			x: 0,
+			y: 0,
+			halo: 0,
+			spread: { v: 0, unit: 'px' },
+			ratio: 1,
+			blur: 0,
+			mode: sharedMode
+		};
+
+		if (sh) {
+			const preLengths = [], postLengths = [];
+			let seenContrast = false;
+			for (const tok of sh.split(/[\s,]+/).filter(Boolean)) {
+				const low = tok.toLowerCase();
+				if (MODES.has(low)) { out.mode = low; continue; }
+				const mPct = /^([+-]?(?:\d+\.?\d*|\.\d+))%$/.exec(tok);
+				if (mPct) {
+					out.spread = { v: Math.max(0, Math.min(100, parseFloat(mPct[1]))), unit: '%' };
+					continue;
+				}
+				const len = parseLengthPx(tok, rootFontPx);
+				if (len !== null) {
+					if (!seenContrast) preLengths.push(len);
+					else postLengths.push(Math.max(0, len));
+					continue;
+				}
+				const c = K.parseContrast(tok, 1);
+				seenContrast = true;
+				if (!c.ok) { ok = false; reason = '--ipax-text: ' + c.reason; }
+				else {
+					out.ratio = c.ratio;
+					if (c.warning) warnings.push(c.warning);
+				}
+			}
+			if (preLengths.length >= 1) out.x = preLengths[0];
+			if (preLengths.length >= 2) out.y = preLengths[1];
+			if (preLengths.length >= 3) out.halo = Math.max(0, preLengths[2]);
+			if (postLengths.length >= 1) out.blur = postLengths[0];
+			if (postLengths.length >= 2) out.spread = { v: postLengths[1], unit: 'px' };
+		}
+
+		const xv = parseLengthOrBarePx(xLong, rootFontPx);
+		if (xv !== null) out.x = xv;
+		const yv = parseLengthOrBarePx(yLong, rootFontPx);
+		if (yv !== null) out.y = yv;
+		const hv = parseLengthOrBarePx(hLong, rootFontPx);
+		if (hv !== null) out.halo = Math.max(0, hv);
+		const bv = parseLengthOrBarePx(bLong, rootFontPx);
+		if (bv !== null) out.blur = Math.max(0, bv);
+
+		if (cLong) {
+			const c = K.parseContrast(cLong, 1);
+			if (!c.ok) { ok = false; reason = '--ipax-text-contrast: ' + c.reason; }
+			else {
+				out.ratio = c.ratio;
+				if (c.warning) warnings.push(c.warning);
+			}
+		}
+
+		if (sLong) {
+			const mPct = /^([+-]?(?:\d+\.?\d*|\.\d+))%$/.exec(sLong);
+			if (mPct) {
+				out.spread = { v: Math.max(0, Math.min(100, parseFloat(mPct[1]))), unit: '%' };
+			} else {
+				const sv = parseLengthOrBarePx(sLong, rootFontPx);
+				if (sv !== null) out.spread = { v: Math.max(0, sv), unit: 'px' };
+			}
+		}
+
+		if (MODES.has(mLong)) out.mode = mLong;
+		out.on = hasDecl && (out.ratio > 1 || out.blur > 0);
+
+		return { ok, reason, warnings, spec: out, hasDecl };
+	}
+
 	function readParams(el) {
 		const N = svc('names'), cs = getComputedStyle(el), cfg = svc('config');
 		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
-		const c = svc('contrast').parseContrast(get('contrast'));
-		const feather = parseFeather(
-			get('feather'),
-			get('feather-top'),
-			get('feather-right'),
-			get('feather-bottom'),
-			get('feather-left')
-		);
-		const b = parseFloat(get('blur'));
+		const rootFontPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+		const rawSharedMode = cs.getPropertyValue(N.modeProp).trim().toLowerCase();
+		const sharedMode = MODES.has(rawSharedMode) ? rawSharedMode : 'default';
+
+		const txt = parseTextParams(cs, sharedMode, rootFontPx);
+		const box = parseBoxParams(cs, sharedMode, rootFontPx, txt.hasDecl);
+
 		return {
-			ok: c.ok,
-			reason: c.reason || '',
-			ratio: c.ratio || 4.5,
-			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
-			feather,
-			blur: b > 0 ? b : 0,
+			ok: box.ok && txt.ok,
+			reason: box.reason || txt.reason,
+			warnings: box.warnings.concat(txt.warnings),
+			ratio: box.ratio,
+			mode: box.mode,
+			feather: box.feather,
+			blur: box.blur,
+			text: txt.spec,
 			color: cs.color,
 			performance: parsePerf(get('performance'), cfg.performance),
 			minBudget: parseNum(get('budget-min'), cfg.minBudget),

@@ -2,36 +2,7 @@
  * ipax-backdrop / 3200-kernel-webgl.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, WebGL backend. Same contract as the CPU backend
- * (3000-kernel.js), computed by the fragment shader in 3210.
- *
- * ONE shared WebGL context: browsers cap contexts per page, so every managed
- * element renders in turn into the same hidden canvas, and the caller copies
- * the result into the element's own layer right away.
- *
- * What goes to the GPU: the backdrop estimate (texture), the unknown-cell grid
- * (texture) and a handful of uniforms. Nothing is read back, so there are no
- * contrast statistics on this backend (stats = null).
- *
- * PERFORMANCE (v0.1.05) - nothing is reallocated while sizes vary
- *   - The drawing buffer only GROWS (rounded up to 64 px). Each render draws into its
- *     lower-left w x h corner (gl.viewport) and returns result.srcRect, the
- *     rectangle of the canvas that holds the pixels (GL origin is bottom-left, so
- *     srcRect.y = canvasHeight - h). compositor.draw() copies only that rectangle.
- *     REQUIRES the v0.1.05 4000-compositor.js (srcRect support).
- *   - The estimate, blur and grid textures also only grow. Content is uploaded with
- *     texSubImage2D into the corner and the shader scales the UVs (uTexSize, uGridTex).
- *   - The unknown grid V (already 0/1 bytes) is uploaded directly: no per-render copy.
- *   - Samplers, vertex attribute, pixel-store state and the program are set once.
- *   - Uniform arrays are preallocated.
- *   - gl.getError() is a synchronous round trip to the GPU process, so it only runs on
- *     the first renders and then every 16th. Context loss is caught by its event.
- *
- * Availability checks (any failure marks the backend unavailable and the
- * dispatcher falls back to the CPU kernel): context creation (software
- * renderers are refused), highp floats in fragment shaders, shader
- * compilation and linking, any GL error after a draw, and context loss.
- * A lost context that is later restored makes the backend available again.
+ * CHAPTER 3 - KERNEL, WebGL backend. Paired with 3100-kernel-cpu.js and 3210-kernel-webgl-shaders.js.
  *
  * Service 'ipax-backdrop:kernel-webgl': available(), render(input),
  *   disable(reason), reason(), reset()
@@ -41,20 +12,30 @@
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
-	const UNIFORMS = ['uEst', 'uEstBlur', 'uHasBlur', 'uGrid', 'uSize', 'uTexSize', 'uGridTex', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBypass', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
+	const UNIFORMS = [
+		'uEst', 'uEstBlur', 'uHasBlur', 'uBlurRatios',
+		'uGrid', 'uHalo', 'uSize', 'uTexSize', 'uGridTex',
+		'uHaloTex', 'uHaloInfo', 'uHaloOn', 'uHaloShared',
+		'uBox', 'uDim', 'uScale', 'uFeather', 'uGridInfo',
+		'uHasEst', 'uTri', 'uTriH', 'uRatioS', 'uRatioSH',
+		'uBypass', 'uBypassH', 'uBoxCover',
+		'uBand', 'uBandH', 'uTriVeil', 'uTriVeilH',
+		'uInfl', 'uRunCount', 'uRun', 'uCol', 'uColH'
+	];
 	const ALIGN = 64;
 	const up = (v, a) => Math.ceil(v / (a || ALIGN)) * (a || ALIGN);
 
 	function freshState() {
 		return {
-			canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, buf: null, aPos: -1,
+			canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, texHalo: null, buf: null, aPos: -1,
 			broken: false, why: '',
-			cw: 0, ch: 0,   // drawing buffer size
-			tw: 0, th: 0,   // estimate texture size (allocated)
-			bw: 0, bh: 0,   // blur texture size (allocated)
-			gw: 0, gh: 0,   // grid texture size (allocated)
+			cw: 0, ch: 0,
+			tw: 0, th: 0,
+			bw: 0, bh: 0,
+			gw: 0, gh: 0,
+			hw: 0, hh: 0,
 			maxDim: 0, n: 0,
-			yT: null, pk: null, al: null, vc: null, rect: null,
+			col: null, colH: null, rect: null,
 			srcRect: { x: 0, y: 0, w: 0, h: 0 }
 		};
 	}
@@ -74,13 +55,12 @@
 		return sh;
 	}
 
-	/** Creates a texture and binds it to the CURRENT texture unit. */
-	function makeTexture(gl) {
+	function makeTexture(gl, linear) {
 		const t = gl.createTexture();
 		gl.bindTexture(gl.TEXTURE_2D, t);
-		// NPOT-safe settings: clamp, no mipmaps, nearest.
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		const filter = linear ? gl.LINEAR : gl.NEAREST;
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		return t;
@@ -107,11 +87,11 @@
 			const loc = {};
 			UNIFORMS.forEach((n) => { loc[n] = gl.getUniformLocation(prog, n) || gl.getUniformLocation(prog, n + '[0]'); });
 
-			// One-time state: program, samplers, geometry, pixel storage.
 			gl.useProgram(prog);
 			gl.uniform1i(loc.uEst, 0);
 			gl.uniform1i(loc.uGrid, 1);
 			gl.uniform1i(loc.uEstBlur, 2);
+			gl.uniform1i(loc.uHalo, 3);
 			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 			gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
 			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -126,18 +106,17 @@
 			canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); fail('WebGL context lost'); }, false);
 			canvas.addEventListener('webglcontextrestored', () => { state.broken = false; state.why = ''; state.canvas = null; state.gl = null; }, false);
 
-			// Fresh size bookkeeping: the new context has no allocated storage.
-			state.cw = state.ch = state.tw = state.th = state.bw = state.bh = state.gw = state.gh = 0;
+			state.cw = state.ch = state.tw = state.th = state.bw = state.bh = state.gw = state.gh = state.hw = state.hh = 0;
 			const mvd = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
 			state.maxDim = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), mvd[0], mvd[1]);
-			state.yT = new Float32Array(maxC); state.pk = new Float32Array(maxC);
-			state.al = new Float32Array(maxC); state.vc = new Float32Array(maxC);
+			state.col = new Float32Array(maxC * 4); state.colH = new Float32Array(maxC * 4);
 			state.rect = new Float32Array(maxRuns * 4);
 
 			state.canvas = canvas; state.gl = gl; state.prog = prog; state.loc = loc; state.buf = buf; state.aPos = aPos;
 			gl.activeTexture(gl.TEXTURE0); state.texEst = makeTexture(gl);
 			gl.activeTexture(gl.TEXTURE1); state.texGrid = makeTexture(gl);
 			gl.activeTexture(gl.TEXTURE2); state.texBlur = makeTexture(gl);
+			gl.activeTexture(gl.TEXTURE3); state.texHalo = makeTexture(gl, true);
 			return true;
 		} catch (err) {
 			return fail(String(err && err.message || err));
@@ -148,10 +127,10 @@
 		if (!init()) throw new Error(state.why || 'WebGL unavailable');
 		const K = svc('contrast'), maxRuns = svc('limits').maxRuns;
 		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
+		const halo = input.halo && input.halo.mask ? input.halo : null;
 		const gl = state.gl, L = state.loc, maxDim = state.maxDim;
 		if (w > maxDim || h > maxDim || grid.nx > maxDim || grid.ny > maxDim) throw new Error('working size ' + w + 'x' + h + ' exceeds the GPU limit ' + maxDim);
 
-		// 1. Drawing buffer: only grows. Changing canvas.width/height reallocates it, so it is avoided.
 		if (w > state.cw || h > state.ch) {
 			state.cw = Math.min(maxDim, Math.max(state.cw, up(w)));
 			state.ch = Math.min(maxDim, Math.max(state.ch, up(h)));
@@ -159,16 +138,14 @@
 		}
 		gl.viewport(0, 0, w, h);
 
-		// 2. Estimate texture: allocated once per growth, filled with texSubImage2D.
 		if (w > state.tw || h > state.th) {
 			state.tw = Math.min(maxDim, Math.max(state.tw, up(w)));
 			state.th = Math.min(maxDim, Math.max(state.th, up(h)));
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, state.texEst);
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, state.tw, state.th, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-			state.bw = 0; state.bh = 0; // the blur texture must match the new size
+			state.bw = 0; state.bh = 0;
 		}
-		// A tainted canvas throws SecurityError: veil only.
 		let hasEst = 0, tainted = false;
 		if (est) {
 			try {
@@ -179,7 +156,6 @@
 			} catch (e) { tainted = true; }
 		}
 
-		// 3. Blurred estimate -> texture unit 2 (same allocated size as the estimate).
 		let hasBlur = 0;
 		if (estBlur && !tainted) {
 			try {
@@ -191,10 +167,9 @@
 				}
 				gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, estBlur);
 				hasBlur = 1;
-			} catch (e) { } // silent fail, falls back to sharp
+			} catch (e) { }
 		}
 
-		// 4. Unknown cells -> texture unit 1. V is already 0/1 bytes; the shader multiplies by 255.
 		gl.activeTexture(gl.TEXTURE1);
 		gl.bindTexture(gl.TEXTURE_2D, state.texGrid);
 		if (grid.nx > state.gw || grid.ny > state.gh) {
@@ -204,20 +179,62 @@
 		}
 		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, grid.nx, grid.ny, gl.LUMINANCE, gl.UNSIGNED_BYTE, grid.V);
 
-		// 5. Per-colour parameters come from the shared contrast utilities.
-		const rS = K.solveRatio(params.ratio), tri = params.mode === 'tricontrast';
+		let hmw = 1, hmh = 1, hcs = 1;
+		if (halo) {
+			const mk = halo.mask;
+			hmw = mk.mw; hmh = mk.mh; hcs = mk.cs;
+			if (hmw > maxDim || hmh > maxDim) throw new Error('halo mask ' + hmw + 'x' + hmh + ' exceeds the GPU limit ' + maxDim);
+			gl.activeTexture(gl.TEXTURE3);
+			gl.bindTexture(gl.TEXTURE_2D, state.texHalo);
+			if (hmw > state.hw || hmh > state.hh) {
+				state.hw = Math.min(maxDim, Math.max(state.hw, up(hmw, 16)));
+				state.hh = Math.min(maxDim, Math.max(state.hh, up(hmh, 16)));
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, state.hw, state.hh, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, null);
+			}
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, hmw, hmh, gl.LUMINANCE, gl.UNSIGNED_BYTE, mk.data);
+		}
+
+		const rS = K.solveRatio(params.ratio), triB = params.mode === 'tricontrast';
+		const rH = halo ? halo.ratio : params.ratio, rSH = K.solveRatio(rH);
+		const triH = halo ? ((halo.mode || params.mode) === 'tricontrast') : triB;
+		const shared = !!(halo && halo.shared);
+		const bypassB = K.isBypass(params.ratio);
+		const bypassH = !halo || K.isBypass(rH);
+
+		const boxBlur = input.boxBlur !== undefined ? input.boxBlur : (params.blur || 0);
+		const textBlur = input.textBlur !== undefined ? input.textBlur : (halo ? (halo.blur || 0) : 0);
+		const maxBlur = input.maxBlur !== undefined ? input.maxBlur : Math.max(boxBlur, textBlur);
+		const boxBlurRatio = maxBlur > 0 ? boxBlur / maxBlur : 0;
+		const textBlurRatio = maxBlur > 0 ? textBlur / maxBlur : 0;
+
 		const runs = colors.runs.length > maxRuns ? colors.runs.slice(0, maxRuns) : colors.runs;
 		const pcs = [K.prepareColor(colors.base, rS)];
 		for (let i = 0; i < runs.length; i++) pcs.push(K.prepareColor(runs[i].c, rS));
-		const yT = state.yT, pk = state.pk, al = state.al, vc = state.vc, rect = state.rect;
-		for (let i = 0; i < pcs.length; i++) { const p = pcs[i]; yT[i] = p.yT; pk[i] = p.pkL; al[i] = p.al; vc[i] = p.vc / 255; }
+		let pcsH = pcs;
+		if (halo && !shared) {
+			pcsH = [K.prepareColor(colors.base, rSH)];
+			for (let i = 0; i < runs.length; i++) pcsH.push(K.prepareColor(runs[i].c, rSH));
+		}
+		const col = state.col, colH = state.colH, rect = state.rect;
+		for (let i = 0; i < pcs.length; i++) {
+			const p = pcs[i], q = pcsH[i];
+			col[i * 4] = p.yT; col[i * 4 + 1] = p.pkL; col[i * 4 + 2] = p.al; col[i * 4 + 3] = p.vc / 255;
+			colH[i * 4] = q.yT; colH[i * 4 + 1] = q.pkL; colH[i * 4 + 2] = q.al; colH[i * 4 + 3] = q.vc / 255;
+		}
 		for (let i = 0; i < runs.length; i++) { const r = runs[i]; rect[i * 4] = r.x0; rect[i * 4 + 1] = r.y0; rect[i * 4 + 2] = r.x1; rect[i * 4 + 3] = r.y1; }
 		const band = K.band(params.ratio), tv = K.bandVeil(band);
+		const bandH = halo ? K.band(rH) : band, tvH = halo ? K.bandVeil(bandH) : tv;
 
 		gl.uniform1f(L.uHasBlur, hasBlur);
+		gl.uniform2f(L.uBlurRatios, boxBlurRatio, textBlurRatio);
 		gl.uniform2f(L.uSize, w, h);
 		gl.uniform2f(L.uTexSize, state.tw, state.th);
 		gl.uniform2f(L.uGridTex, state.gw, state.gh);
+		gl.uniform2f(L.uHaloTex, state.hw || 1, state.hh || 1);
+		gl.uniform3f(L.uHaloInfo, hmw, hmh, hcs);
+		gl.uniform1f(L.uHaloOn, halo ? 1 : 0);
+		gl.uniform1f(L.uHaloShared, shared ? 1 : 0);
+		gl.uniform2f(L.uBox, input.ox || 0, input.oy || 0);
 		gl.uniform2f(L.uDim, W, H);
 		gl.uniform1f(L.uScale, s);
 		const fParam = params.feather;
@@ -227,27 +244,30 @@
 		gl.uniform4f(L.uFeather, f.top || 0, f.right || 0, f.bottom || 0, f.left || 0);
 		gl.uniform3f(L.uGridInfo, grid.nx, grid.ny, grid.g);
 		gl.uniform1f(L.uHasEst, hasEst);
-		gl.uniform1f(L.uTri, tri ? 1 : 0);
+		gl.uniform1f(L.uTri, triB ? 1 : 0);
+		gl.uniform1f(L.uTriH, triH ? 1 : 0);
 		gl.uniform1f(L.uRatioS, rS);
-		gl.uniform1f(L.uBypass, K.isBypass(params.ratio) ? 1 : 0);
+		gl.uniform1f(L.uRatioSH, rSH);
+		gl.uniform1f(L.uBypass, bypassB ? 1 : 0);
+		gl.uniform1f(L.uBypassH, bypassH ? 1 : 0);
+		gl.uniform1f(L.uBoxCover, input.boxCover === false ? 0 : 1);
 		gl.uniform2f(L.uBand, band.lo, band.hi);
+		gl.uniform2f(L.uBandH, bandH.lo, bandH.hi);
 		gl.uniform2f(L.uTriVeil, tv.al, tv.vc / 255);
+		gl.uniform2f(L.uTriVeilH, tvH.al, tvH.vc / 255);
+		gl.uniform1f(L.uInfl, input.infl > 6 ? input.infl : 6);
 		gl.uniform1i(L.uRunCount, runs.length);
 		gl.uniform4fv(L.uRun, rect);
-		gl.uniform1fv(L.uYT, yT);
-		gl.uniform1fv(L.uPk, pk);
-		gl.uniform1fv(L.uAl, al);
-		gl.uniform1fv(L.uVc, vc);
+		gl.uniform4fv(L.uCol, col);
+		gl.uniform4fv(L.uColH, colH);
 
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-		// getError is synchronous: first renders, then every 16th.
 		if (state.n++ < 4 || (state.n & 15) === 0) {
 			const err = gl.getError();
 			if (err !== gl.NO_ERROR) throw new Error('WebGL error 0x' + err.toString(16));
 		}
 
-		// The result sits in the lower-left w x h corner of the buffer. In bitmap coordinates (origin top-left) that is y = ch - h.
 		const sr = state.srcRect;
 		sr.x = 0; sr.y = state.ch - h; sr.w = w; sr.h = h;
 		return { source: state.canvas, srcRect: sr, stats: null, tainted };

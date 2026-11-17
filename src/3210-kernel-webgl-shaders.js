@@ -2,33 +2,14 @@
  * ipax-backdrop / 3210-kernel-webgl-shaders.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, WebGL backend: shader sources. No logic, only text.
- *
- * GLSL ES 1.00 (WebGL 1) on purpose: the kernel needs no WebGL 2 feature and
- * WebGL 1 is available everywhere. The fragment shader is a line-by-line port
- * of 3100-kernel-cpu.js; keep both in sync. Loops have constant bounds, and
- * uniform arrays are only indexed by loop counters, as GLSL ES 1.00 requires.
- *
- * Per-colour parameters (luminance, direction, veil alpha and level) are
- * computed on the CPU by 0110-util-contrast.js and passed as uniforms, so the
- * contrast maths has a single source of truth.
- *
- * v0.1.05: textures may be larger than the working size (uTexSize, uGridTex), so the
- * backend can reuse them with texSubImage2D. The unknown grid is uploaded as raw 0/1 bytes.
- * Bypass uses the same test as the CPU kernel (uBypass) instead of a 1.05 threshold.
+ * CHAPTER 3 - KERNEL, WebGL backend: shader sources (GLSL ES 1.00).
+ * Line-by-line port of 3100-kernel-cpu.js.
  *
  * Service 'ipax-backdrop:webgl-shaders': {vertex, fragment(maxRuns)}
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
-
-
-
-
-
-
-
 
 	const vertex = [
 		'attribute vec2 aPos;',
@@ -41,29 +22,41 @@ precision highp float;
 #define MAXRUNS __MAXRUNS__
 #define MAXC __MAXC__
 
-uniform sampler2D uEst;     // estimated backdrop (RGBA8, row 0 = top)
-uniform sampler2D uEstBlur; // blurred estimated backdrop (RGBA8)
-uniform float uHasBlur;     // 1.0 if uEstBlur is bound and active
-uniform sampler2D uGrid;    // unknown cells (LUMINANCE, 1.0 = unknown)
-uniform vec2  uSize;        // working size in px
-uniform vec2  uTexSize;     // allocated size of uEst / uEstBlur (>= uSize; the textures only grow)
-uniform vec2  uGridTex;     // allocated size of uGrid (>= nx, ny)
-uniform vec2  uDim;         // element size in CSS px
-uniform float uScale;       // working px per CSS px
-uniform vec4  uFeather;     // CSS px: top, right, bottom, left
-uniform vec3  uGridInfo;    // nx, ny, cell size (CSS px)
-uniform float uHasEst;      // 0.0 when the estimate could not be uploaded
-uniform float uTri;         // 1.0 = tricontrast
-uniform float uRatioS;      // ratio the solver aims for (with safety margin)
-uniform float uBypass;      // 1.0 = ratio <= 1: no solve, no veil (same test as contrast.isBypass)
-uniform vec2  uBand;        // tricontrast band: lo, hi (luminance)
-uniform vec2  uTriVeil;     // tricontrast veil: alpha, level 0..1
+uniform sampler2D uEst;
+uniform sampler2D uEstBlur;
+uniform float uHasBlur;
+uniform vec2  uBlurRatios;  // x = boxBlur / maxBlur, y = textBlur / maxBlur
+uniform sampler2D uGrid;
+uniform sampler2D uHalo;
+uniform vec2  uSize;
+uniform vec2  uTexSize;
+uniform vec2  uGridTex;
+uniform vec2  uHaloTex;
+uniform vec3  uHaloInfo;
+uniform float uHaloOn;
+uniform float uHaloShared;
+uniform vec2  uBox;
+uniform vec2  uDim;
+uniform float uScale;
+uniform vec4  uFeather;
+uniform vec3  uGridInfo;
+uniform float uHasEst;
+uniform float uTri;
+uniform float uTriH;
+uniform float uRatioS;
+uniform float uRatioSH;
+uniform float uBypass;
+uniform float uBypassH;
+uniform float uBoxCover;
+uniform vec2  uBand;
+uniform vec2  uBandH;
+uniform vec2  uTriVeil;
+uniform vec2  uTriVeilH;
+uniform float uInfl;
 uniform int   uRunCount;
-uniform vec4  uRun[MAXRUNS];  // x0, y0, x1, y1 in CSS px relative to the element
-uniform float uYT[MAXC];      // text luminance; index 0 = base colour, 1.. = runs
-uniform float uPk[MAXC];      // 1.0 = lighten the backdrop, 0.0 = darken it
-uniform float uAl[MAXC];      // veil alpha
-uniform float uVc[MAXC];      // veil level 0..1
+uniform vec4  uRun[MAXRUNS];
+uniform vec4  uCol[MAXC];
+uniform vec4  uColH[MAXC];
 
 float sm(float m) { return m * m * (3.0 - 2.0 * m); }
 float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
@@ -92,17 +85,26 @@ vec3 okToLin(float L, float a, float b) {
     -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 0.0, 1.0);
 }
 
-void colorOf(int idx, out float yT, out float pk, out float al, out float vc) {
-  yT = uYT[0]; pk = uPk[0]; al = uAl[0]; vc = uVc[0];
+vec4 colOf(int idx) {
+  vec4 c = uCol[0];
   for (int k = 1; k < MAXC; k++) {
-    if (k == idx) { yT = uYT[k]; pk = uPk[k]; al = uAl[k]; vc = uVc[k]; }
+    if (k == idx) c = uCol[k];
   }
+  return c;
+}
+
+vec4 colHOf(int idx) {
+  vec4 c = uColH[0];
+  for (int k = 1; k < MAXC; k++) {
+    if (k == idx) c = uColH[k];
+  }
+  return c;
 }
 
 float gridAt(float i, float j) {
   float nx = uGridInfo.x; float ny = uGridInfo.y;
   float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0);
-  return min(texture2D(uGrid, vec2((ci + 0.5) / uGridTex.x, (cj + 0.5) / uGridTex.y)).r * 255.0, 1.0); // V is uploaded as 0/1 bytes
+  return min(texture2D(uGrid, vec2((ci + 0.5) / uGridTex.x, (cj + 0.5) / uGridTex.y)).r * 255.0, 1.0);
 }
 
 float veilFrac(float rx, float ry) {
@@ -114,21 +116,26 @@ float veilFrac(float rx, float ry) {
        + (gridAt(ci, cj + 1.0) * (1.0 - tx) + gridAt(ci + 1.0, cj + 1.0) * tx) * ty;
 }
 
-float defL(float L0, float A, float B, vec3 lin0, float yT, float pk) {
-  if (cr(yT, lum(lin0)) >= uRatioS) return L0;
-  if (cr(yT, lum(okToLin(pk, A, B))) < uRatioS) return pk;
+float haloAt(float rx, float ry) {
+  vec2 t = clamp(vec2(rx, ry) / uHaloInfo.z, vec2(0.5), uHaloInfo.xy - vec2(0.5));
+  return texture2D(uHalo, t / uHaloTex).r;
+}
+
+float defL(float L0, float A, float B, vec3 lin0, float yT, float pk, float rs) {
+  if (cr(yT, lum(lin0)) >= rs) return L0;
+  if (cr(yT, lum(okToLin(pk, A, B))) < rs) return pk;
   float lo = L0; float hi = pk;
   for (int n = 0; n < 9; n++) {
     float mid = (lo + hi) * 0.5;
-    if (cr(yT, lum(okToLin(mid, A, B))) >= uRatioS) hi = mid; else lo = mid;
+    if (cr(yT, lum(okToLin(mid, A, B))) >= rs) hi = mid; else lo = mid;
   }
   return hi;
 }
 
-float triL(float L0, float A, float B, float Y0) {
-  if (Y0 >= uBand.x && Y0 <= uBand.y) return L0;
-  bool up = Y0 < uBand.x;
-  float target = up ? uBand.x : uBand.y;
+float triL(float L0, float A, float B, float Y0, vec2 bd) {
+  if (Y0 >= bd.x && Y0 <= bd.y) return L0;
+  bool up = Y0 < bd.x;
+  float target = up ? bd.x : bd.y;
   float lo = up ? L0 : 0.0; float hi = up ? 1.0 : L0;
   for (int n = 0; n < 13; n++) {
     float mid = (lo + hi) * 0.5;
@@ -137,36 +144,68 @@ float triL(float L0, float A, float B, float Y0) {
   return (lo + hi) * 0.5;
 }
 
+float solveBoxL(vec3 ok, vec3 lin0, int kk, float wk, float rs, vec2 bd, float isTri) {
+  if (isTri > 0.5) return triL(ok.x, ok.y, ok.z, lum(lin0), bd);
+  vec4 c = colOf(0);
+  float Lt = defL(ok.x, ok.y, ok.z, lin0, c.x, c.y, rs);
+  if (kk >= 0) {
+    vec4 c2 = colOf(kk + 1);
+    Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, c2.x, c2.y, rs) - Lt);
+  }
+  return Lt;
+}
+
+float solveTextL(vec3 ok, vec3 lin0, int kk, float wk, float rs, vec2 bd, float isTri) {
+  if (isTri > 0.5) return triL(ok.x, ok.y, ok.z, lum(lin0), bd);
+  vec4 c = colHOf(0);
+  float Lt = defL(ok.x, ok.y, ok.z, lin0, c.x, c.y, rs);
+  if (kk >= 0) {
+    vec4 c2 = colHOf(kk + 1);
+    Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, c2.x, c2.y, rs) - Lt);
+  }
+  return Lt;
+}
+
 void main() {
-  // Pixel centre in working px, y measured from the top like the CPU path.
   vec2 px = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y);
   float rx = px.x / uScale;
   float ry = px.y / uScale;
+  float bx = rx - uBox.x;
+  float by = ry - uBox.y;
+  float eps = 1.0 / uScale;
+  bool inBox = bx > -eps && bx < uDim.x + eps && by > -eps && by < uDim.y + eps;
+  bool covers = inBox && uBoxCover > 0.5;
 
-  float M = 1.0;
-  float mT = uFeather.x > 0.0 ? clamp(ry / uFeather.x, 0.0, 1.0) : 1.0;
-  float mR = uFeather.y > 0.0 ? clamp((uDim.x - rx) / uFeather.y, 0.0, 1.0) : 1.0;
-  float mB = uFeather.z > 0.0 ? clamp((uDim.y - ry) / uFeather.z, 0.0, 1.0) : 1.0;
-  float mL = uFeather.w > 0.0 ? clamp(rx / uFeather.w, 0.0, 1.0) : 1.0;
-  M = sm(min(min(mT, mR), min(mB, mL)));
+  float Mb = 0.0;
+  if (covers) {
+    float uT = uFeather.x > 0.0 ? (uFeather.x - by) / uFeather.x : 0.0;
+    float uR = uFeather.y > 0.0 ? (bx - (uDim.x - uFeather.y)) / uFeather.y : 0.0;
+    float uB = uFeather.z > 0.0 ? (by - (uDim.y - uFeather.z)) / uFeather.z : 0.0;
+    float uL = uFeather.w > 0.0 ? (uFeather.w - bx) / uFeather.w : 0.0;
+    float ux = max(max(uL, uR), 0.0);
+    float uy = max(max(uT, uB), 0.0);
+    float r = (ux > 0.0 && uy > 0.0) ? sqrt(ux * ux + uy * uy) : max(ux, uy);
+    Mb = sm(clamp(1.0 - r, 0.0, 1.0));
+  }
+  float Mh = 0.0;
+  if (uHaloOn > 0.5) Mh = haloAt(rx, ry);
+
+  if (!covers && Mh <= 0.0) { gl_FragColor = vec4(0.0); return; }
+  float cov = covers ? 1.0 : Mh;
+  float mScreen = Mb + Mh - Mb * Mh;
 
   float known = 0.0;
   if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry);
 
-
-
-
-
-
   float wk = 0.0;
   int kk = -1;
-  if (uTri < 0.5) {
+  if (uTri < 0.5 || uTriH < 0.5) {
     for (int k = 0; k < MAXRUNS; k++) {
       if (k >= uRunCount) break;
       vec4 r = uRun[k];
       float dx = max(max(r.x - rx, 0.0), rx - r.z);
       float dy = max(max(r.y - ry, 0.0), ry - r.w);
-      float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / 6.0, 0.0, 1.0));
+      float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / uInfl, 0.0, 1.0));
       if (wg > wk) { wk = wg; kk = k; }
     }
   }
@@ -176,42 +215,60 @@ void main() {
     vec2 uv = px / uTexSize;
     vec4 e = texture2D(uEst, uv);
     vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b));
-    
+
     if (uHasBlur > 0.5) {
-      vec4 eb = texture2D(uEstBlur, uv);
-      vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b));
-      lin0 = lin0 + M * (blin - lin0);
+      float mBlur = abs(uBlurRatios.x - uBlurRatios.y) < 0.0001
+        ? mScreen
+        : max(Mb * uBlurRatios.x, Mh * uBlurRatios.y);
+      if (mBlur > 0.0) {
+        vec4 eb = texture2D(uEstBlur, uv);
+        vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b));
+        lin0 = lin0 + mBlur * (blin - lin0);
+      }
     }
-    
-    if (uBypass > 0.5) {
+
+    if (uBypass > 0.5 && uBypassH > 0.5) {
       img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b));
     } else {
       vec3 ok = linToOk(lin0);
-      float Lt;
-      if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0));
-      else {
-        float yT; float pk; float al; float vc;
-        colorOf(0, yT, pk, al, vc);
-        Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk);
-        if (kk >= 0) {
-          colorOf(kk + 1, yT, pk, al, vc);
-          Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt);
-        }
+      float L1 = ok.x;
+      if (uBypass < 0.5 && mScreen > 0.0) {
+        float LtB = solveBoxL(ok, lin0, kk, wk, uRatioS, uBand, uTri);
+        L1 = clamp(ok.x + mScreen * (LtB - ok.x), 0.0, 1.0);
       }
-      vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z);
+      float L2 = L1;
+      if (uBypassH < 0.5 && Mh > 0.0) {
+        vec3 lin1 = okToLin(L1, ok.y, ok.z);
+        float LtH = solveTextL(vec3(L1, ok.y, ok.z), lin1, kk, wk, uRatioSH, uBandH, uTriH);
+        float hk = covers ? Mh : 1.0;
+        L2 = clamp(L1 + hk * (LtH - L1), 0.0, 1.0);
+      }
+      vec3 o = okToLin(L2, ok.y, ok.z);
       img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b));
     }
   }
 
-  float pAl; float pVc;
-  if (uTri > 0.5) { pAl = uTriVeil.x; pVc = uTriVeil.y; }
-  else { float yT2; float pk2; colorOf(wk > 0.5 ? kk + 1 : 0, yT2, pk2, pAl, pVc); }
-
-  float wV = uBypass > 0.5 ? 0.0 : (1.0 - known) * pAl * M;
-  float aO = known + wV;
+  int vi = wk > 0.5 ? kk + 1 : 0;
+  float wB = 0.0;
+  float vB = 0.0;
+  if (uBypass < 0.5 && mScreen > 0.0) {
+    if (uTri > 0.5) { wB = mScreen * uTriVeil.x; vB = uTriVeil.y; }
+    else { vec4 cb = colOf(vi); wB = mScreen * cb.z; vB = cb.w; }
+  }
+  float wH = 0.0;
+  float vH = 0.0;
+  if (uBypassH < 0.5 && Mh > 0.0) {
+    if (uTriH > 0.5) { wH = Mh * uTriVeilH.x; vH = uTriVeilH.y; }
+    else { vec4 ch = colHOf(vi); wH = Mh * ch.z; vH = ch.w; }
+  }
+  float wm = wH > wB ? wH : wB;
+  float vcv = wH > wB ? vH : vB;
+  float wV = (1.0 - known) * wm;
+  float kc = known * cov;
+  float aO = kc + wV;
   if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; }
-  vec3 col = (known * img + wV * vec3(pVc)) / aO;
-  gl_FragColor = vec4(col * aO, aO); // premultiplied alpha
+  vec3 col = (kc * img + wV * vec3(vcv)) / aO;
+  gl_FragColor = vec4(col * aO, aO);
 }
 `;
 /* glsl-minifier-end */

@@ -1,4 +1,4 @@
-/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: 2026-11-14 */
+/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: 2026-11-17 */
 
 /* --- lib/j0-kernel/01-bus-j0kernel.js --- */
 /* j0 framework kernel 0.4.01 • 11/nov/2026
@@ -265,6 +265,8 @@
  *   image-loaded  {}                                  a background image finished loading
  *   invalidate    {reason}                            geometry changed, a refresh is needed
  */
+
+
 (function () {
 	'use strict';
 
@@ -275,10 +277,15 @@
 	const j0 = window.j0;
 
 	const names = Object.freeze({
-		propPrefix: '--ipax-backdrop-',          // CSS custom properties read by the reader
+		propPrefix: '--ipax-backdrop-',          // CSS custom properties for container backdrop
+		textPrefix: '--ipax-text-',              // CSS custom properties for glyph-contour effect
+		boxShorthand: '--ipax-backdrop',         // shorthand property for container
+		textShorthand: '--ipax-text',            // shorthand property for glyph contour
+		modeProp: '--ipax-mode',                 // shared OKLab solver mode
 		layerTag: 'ipax-backdrop-layer',         // element created under every managed element
 		managedAttr: 'data-ipax-backdrop-managed', // set by the compositor on managed elements
-		markerAttr: 'data-ipax-backdrop'         // optional opt-in marker set by the page author
+		markerAttr: 'data-ipax-backdrop',        // optional opt-in marker for container
+		textMarkerAttr: 'data-ipax-text'         // optional opt-in marker for glyph contour
 	});
 
 	const limits = Object.freeze({
@@ -295,7 +302,6 @@
 		autoStart: true     // start on DOMContentLoaded
 	};
 
-	// Payload contracts, checked by the j0 bus when window.j0.QA is truthy.
 	const S = j0.bus.schema;
 	S['ipax-backdrop:ready'] = {};
 	S['ipax-backdrop:updated'] = { element: 'object', ms: 'number', backend: 'string' };
@@ -395,12 +401,12 @@
  * never disagree about the maths.
  *
  * Service 'ipax-backdrop:contrast':
- *   MAX_WCAG_RATIO                   15. Larger numbers are read as APCA Lc (unsupported).
+  *   MAX_WCAG_RATIO                   15. Ceiling corresponding to perceptual black-level saturation (~106 Lc).
  *   ratio(yA, yB)                    WCAG contrast ratio of two relative luminances.
- *   parseContrast(raw)               CSS value -> {ok, ratio} | {ok:false, reason}
- *   solveRatio(ratio)                ratio the solver aims for (see SAFETY)
- *   isBypass(ratio)                  true when ratio <= 1: every colour pair already meets it, so the
- *                                    kernels skip the solve and the veil (blur-only mode)
+ *   lcToWcagFallback(lc)             Perceptual power-law mapping from |Lc| (0..106) to WCAG ratio (1..15).
+ *   parseContrast(raw, defaultRatio) CSS value -> {ok, ratio, system, warning} | {ok:false, reason}
+ *   solveRatio(ratio)                ratio the solver aims for (with 8-bit rounding safety margin)
+ *   isBypass(ratio)                  true when ratio <= 1
  *   prepareColor(rgb255, solveR)     per text colour: {yT, pkL, pkR, al, vc}
  *   band(ratio)                      tricontrast luminance band {lo, hi, ok}
  *   bandVeil(band)                   translucent grey veil that lands in the band {al, vc}
@@ -414,6 +420,7 @@
  * extreme (black or white) that contrasts more. pkL = 1 means "lighten the
  * background", pkL = 0 means "darken it".
  */
+
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
@@ -424,24 +431,61 @@
 
 	const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 	const solveRatio = (r) => r * SAFETY;
-	/** WCAG ratios are never below 1, so ratio <= 1 asks for nothing. */
 	const isBypass = (r) => r <= 1;
 
-	function parseContrast(raw) {
-		const s = (raw || '').trim();
-		if (s === '') return { ok: true, ratio: 4.5 };
-		if (/lc$/i.test(s)) return { ok: false, reason: 'APCA Lc contrast is not supported in this version (got "' + s + '"). Use a WCAG ratio up to 15.' };
-		const v = parseFloat(s);
-		if (!(v > 0)) return { ok: false, reason: 'Invalid --ipax-backdrop-contrast value "' + s + '".' };
-		if (v > MAX_WCAG_RATIO) return { ok: false, reason: 'Values above 15 are read as APCA Lc, which is not supported in this version (got "' + s + '").' };
-		return { ok: true, ratio: v };
+	function lcToWcagFallback(lc) {
+		const u = Math.min(1, Math.max(0, Math.abs(lc) / 106));
+		const yEq = 0.02 + 0.98 * Math.pow(1 - u, 1.5);
+		return 1.05 / (yEq + 0.05);
 	}
 
-	/**
-	 * Default mode parameters for one text colour.
-	 * al / vc: alpha and grey level (0..255) of the translucent veil that
-	 * guarantees the ratio against the worst possible backdrop.
-	 */
+	function parseContrast(raw, defaultRatio = 4.5) {
+		const s = (raw || '').trim();
+		if (s === '') return { ok: true, ratio: defaultRatio, system: 'wcag', warning: null };
+
+		const mWcag = /^([+-]?(?:\d+\.?\d*|\.\d+)):1$/i.exec(s);
+		if (mWcag) {
+			const v = parseFloat(mWcag[1]);
+			if (!(v >= 1)) return { ok: false, reason: 'WCAG contrast must be >= 1:1 (got "' + s + '").' };
+			return {
+				ok: true,
+				ratio: Math.min(MAX_WCAG_RATIO, v),
+				system: 'wcag',
+				warning: v > MAX_WCAG_RATIO ? 'WCAG contrast ' + s + ' clamped to ' + MAX_WCAG_RATIO + ':1.' : null
+			};
+		}
+
+		const mApca = /^([+-]?(?:\d+\.?\d*|\.\d+))lc$/i.exec(s);
+		if (mApca) {
+			const lc = parseFloat(mApca[1]);
+			if (!isFinite(lc)) return { ok: false, reason: 'Invalid APCA Lc contrast value "' + s + '".' };
+			const eq = lcToWcagFallback(lc);
+			return {
+				ok: true,
+				ratio: eq,
+				system: 'apca',
+				warning: 'APCA contrast (' + s + ') is not enabled yet due to licensing; applying WCAG ' + eq.toFixed(2) + ':1 fallback.'
+			};
+		}
+
+		if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) {
+			const v = parseFloat(s);
+			if (!(v >= 1)) return { ok: false, reason: 'Invalid contrast value "' + s + '" (must be >= 1).' };
+			if (v > MAX_WCAG_RATIO) {
+				const eq = lcToWcagFallback(v);
+				return {
+					ok: true,
+					ratio: eq,
+					system: 'apca',
+					warning: 'Contrast ' + s + ' (> 15) inferred as APCA Lc; applying WCAG ' + eq.toFixed(2) + ':1 fallback.'
+				};
+			}
+			return { ok: true, ratio: v, system: 'wcag', warning: null };
+		}
+
+		return { ok: false, reason: 'Invalid contrast value "' + s + '".' };
+	}
+
 	function prepareColor(rgb, solveR) {
 		const C = svc('color'), LUT = C.LUT;
 		const yT = C.luminance(LUT[rgb[0] | 0], LUT[rgb[1] | 0], LUT[rgb[2] | 0]);
@@ -453,10 +497,6 @@
 		return { yT, pkL, pkR: Math.max(rW, rB), al: Math.min(1, al + 0.004), vc: pkL ? 255 : 0 };
 	}
 
-	/**
-	 * Tricontrast: luminance band where BOTH white and black text reach the ratio.
-	 * Exists only up to ~4.58:1; the guard shrinks it a little further.
-	 */
 	function band(r) {
 		const G = r < 4.4 ? 0.003 : 0.002;
 		let lo = Math.max(0, 0.05 * r - 0.05) + G, hi = Math.min(1, 1.05 / r - 0.05) - G;
@@ -473,23 +513,24 @@
 		return { al: Math.min(1, al + 0.004), vc: C.clamp01(vlo / al) * 255 };
 	}
 
-	window.j0.register('ipax-backdrop:contrast', { MAX_WCAG_RATIO, ratio, parseContrast, solveRatio, isBypass, prepareColor, band, bandVeil });
+	window.j0.register('ipax-backdrop:contrast', {
+		MAX_WCAG_RATIO, ratio, lcToWcagFallback, parseContrast, solveRatio, isBypass, prepareColor, band, bandVeil
+	});
 })();
 ;
 
 /* --- src/0200-orquestador.js --- */
 /**
- * ipax-backdrop / 0200-orquestador.js (v0.1.05)
+ * ipax-backdrop / 0200-orquestador.js (v0.1.10)
  *
- * Optional keys in config (all have defaults):
+ * CHAPTER 0 - ORCHESTRATOR: schedules and runs the per-frame pipeline.
+ *
+ * Optional keys in config:
  *   frameBudgetMs       12    time spent per frame before yielding to the browser
- *   partialThrottleMs   80    while scrolling, partially visible boxes are recomputed at most this often (0 = every frame)
+ *   partialThrottleMs   80    while scrolling, partially visible boxes are recomputed at most this often
  *   releaseAfterMs      4000  canvas memory of a box is freed after being out of view this long
  *   probeBlock          4     adaptive probing block (see 2000-resolutor.js; 1 = exact)
- *
- * Invalidation uses an EPOCH counter: invalidateAll() bumps it and every record is recomputed when it
- * is next visible, including records that were off-screen when the change happened (they used to keep
- * stale results). Image loads only invalidate the records that were drawn waiting for an image.
+ *   haloMaxExtend       400   how far (CSS px, per side) --ipax-text may grow the layer beyond the box
  */
 (function () {
 	'use strict';
@@ -499,16 +540,40 @@
 	const bus = () => window.j0.bus;
 	const emit = (name, payload) => bus().emit('ipax-backdrop:' + name, payload);
 
+	const ZERO_RECT = { left: 0, top: 0 };
+	const ZERO_EXT = { l: 0, t: 0, r: 0, b: 0 };
+
 	let running = false, pending = false;
 	let records = [], visibleRecords = new Set(), offs = [];
 	let epoch = 0, lastScrollAt = 0;
-	let imgTimer = null, throttleTimer = null, sweepTimer = null;
+	let imgTimer = null, throttleTimer = null, scrollEndTimer = null, sweepTimer = null;
 	const lastMessage = new WeakMap();
 	const perfState = new WeakMap();
 	let visibilityObserver = null;
 	let domObserver = null;
 
 	const clean = (rec) => rec.settled && rec.epoch === epoch;
+
+	const rectsOverlap = (a, b) => !!(
+		a && b &&
+		a.width > 0 && a.height > 0 && b.width > 0 && b.height > 0 &&
+		a.left < b.right && a.right > b.left &&
+		a.top < b.bottom && a.bottom > b.top
+	);
+
+	const copyRect = (r) => ({
+		left: r.left,
+		top: r.top,
+		right: r.right,
+		bottom: r.bottom,
+		width: r.width,
+		height: r.height
+	});
+
+	function compareOrder(a, b) {
+		if (a.z !== b.z) return a.z - b.z;
+		return a.domOrder - b.domOrder;
+	}
 
 	function warnOnce(el, message) {
 		if (lastMessage.get(el) === message) return;
@@ -523,12 +588,37 @@
 		requestAnimationFrame(() => { pending = false; if (running) runAll(); });
 	}
 
-	function invalidateAll() {
+	function unsettleRecord(rec) {
+		rec.settled = false;
+	}
+
+	function unsettleOverlapping(rect, minZ) {
+		let hit = false;
+		for (let i = 0; i < records.length; i++) {
+			const rec = records[i];
+			if (minZ !== undefined && rec.z < minZ) continue;
+			if (rectsOverlap(rect, rec.rect) || rectsOverlap(rect, rec.prevRect)) {
+				rec.settled = false;
+				hit = true;
+			}
+		}
+		return hit;
+	}
+
+	function invalidateAll(payload) {
+		const compositor = svc('compositor');
+		if (payload && payload.target && compositor && compositor.recordsForTarget) {
+			const affected = compositor.recordsForTarget(payload.target);
+			if (affected.length) {
+				for (let i = 0; i < affected.length; i++) affected[i].settled = false;
+				schedule();
+				return;
+			}
+		}
 		epoch++;
 		schedule();
 	}
 
-	/** An image finished loading: only records that were drawn while waiting for one need a redo. */
 	function onImageLoaded() {
 		if (imgTimer) clearTimeout(imgTimer);
 		imgTimer = setTimeout(() => {
@@ -540,21 +630,19 @@
 
 	function onScroll() {
 		lastScrollAt = performance.now();
-		if (!running || pending) return;
+		if (!running) return;
+		if (scrollEndTimer) clearTimeout(scrollEndTimer);
+		scrollEndTimer = setTimeout(() => {
+			scrollEndTimer = null;
+			if (!running) return;
+			for (const rec of visibleRecords) {
+				if (!clean(rec)) { schedule(); return; }
+			}
+		}, 130);
+		if (pending) return;
 		for (const rec of visibleRecords) {
 			if (!clean(rec)) { schedule(); return; }
 		}
-	}
-
-	/** z-index of the nearest ancestor that sets one. Ancestors are shared by many boxes, so they are cached per frame. */
-	function zKey(n, cache) {
-		if (!n || n.nodeType !== 1) return 0;
-		let v = cache.get(n);
-		if (v !== undefined) return v;
-		const z = parseInt(getComputedStyle(n).zIndex, 10);
-		v = isNaN(z) ? zKey(n.parentElement, cache) : z;
-		cache.set(n, v);
-		return v;
 	}
 
 	function runAll() {
@@ -562,52 +650,76 @@
 		const list = Array.from(visibleRecords);
 		if (!list.length) return;
 
-		// Phase 1 (all reads), phase 2 (all writes), phase 3 (reads): one layout instead of one per record.
 		const geo = list.map((rec) => compositor.measure(rec));
 		for (let i = 0; i < list.length; i++) compositor.apply(list[i], geo[i]);
 
-		const vw = window.innerWidth, vh = window.innerHeight, centerY = vh / 2;
+		const vw = window.innerWidth, vh = window.innerHeight;
 		const now = performance.now();
 		const scrolling = now - lastScrollAt < 120;
 		const thr = cfg.partialThrottleMs !== undefined ? cfg.partialThrottleMs : 80;
 		const budget = cfg.frameBudgetMs || 12;
-		const zc = new Map();
-		const dirty = [];
+		const entries = [];
+		const dirtySet = new Set();
 		let throttled = false;
 
-		for (const rec of list) {
+		for (let i = 0; i < list.length; i++) {
+			const rec = list[i];
 			const R = rec.layer.getBoundingClientRect();
 			if (R.width < 4 || R.height < 4) continue;
 			if (R.bottom <= 0 || R.top >= vh || R.right <= 0 || R.left >= vw) continue;
 
 			const fullyInView = R.top >= 0 && R.bottom <= vh && R.left >= 0 && R.right <= vw;
-			// Strict rounding ignores sub-pixel fluctuations of the CSS engine
 			const sizeChanged = Math.abs(Math.round(R.width) - Math.round(rec.lastW)) > 1 ||
 				Math.abs(Math.round(R.height) - Math.round(rec.lastH)) > 1;
+			const posChanged = Math.abs(R.left - rec.lastL) > 0.5 ||
+				Math.abs(R.top - rec.lastT) > 0.5;
+			const zChanged = geo[i].z !== rec.z;
 
-			if (clean(rec) && !sizeChanged) continue;
+			rec.z = geo[i].z;
+			const item = { r: rec, R, fullyInView, z: rec.z, domOrder: rec.domOrder };
+			entries.push(item);
 
-			// While scrolling, a box that is only partly visible would be recomputed every frame.
-			// It already has a result for this epoch, so it is refreshed at a lower rate instead.
-			if (!fullyInView && scrolling && thr > 0 && rec.ready && rec.epoch === epoch && !sizeChanged && now - rec.renderedAt < thr) {
+			const isDirty = !clean(rec) || sizeChanged || posChanged || zChanged;
+			if (!isDirty) {
+				rec.rect = copyRect(R);
+				continue;
+			}
+
+			if (!fullyInView && scrolling && thr > 0 && rec.ready && rec.epoch === epoch && !sizeChanged && !posChanged && !zChanged && now - rec.renderedAt < thr) {
 				throttled = true;
 				continue;
 			}
 
-			// Spatial priority queue: distance to the centre of the viewport
-			dirty.push({ r: rec, R, fullyInView, z: zKey(rec.el, zc), distCenter: Math.abs(R.top + R.height / 2 - centerY) });
+			rec.settled = false;
+			dirtySet.add(rec);
 		}
 
 		if (throttled && !throttleTimer) throttleTimer = setTimeout(() => { throttleTimer = null; schedule(); }, thr);
-		if (!dirty.length) return;
+		if (!dirtySet.size) return;
 
-		dirty.sort((a, b) => (a.z - b.z) || (a.distCenter - b.distCenter));
+		entries.sort(compareOrder);
+
+		for (let i = 0; i < entries.length; i++) {
+			const src = entries[i];
+			if (!dirtySet.has(src.r)) continue;
+			const rOld = src.r.prevRect || src.r.rect;
+			const rNew = src.R;
+			for (let j = i + 1; j < entries.length; j++) {
+				const upper = entries[j];
+				if (dirtySet.has(upper.r)) continue;
+				if (rectsOverlap(rOld, upper.R) || rectsOverlap(rNew, upper.R)) {
+					upper.r.settled = false;
+					dirtySet.add(upper.r);
+				}
+			}
+		}
+
+		const dirty = entries.filter((item) => dirtySet.has(item.r));
 		const activeCount = dirty.length;
 
-		// Time-budget queue: process in priority order until the frame budget is used, then yield.
 		const t0 = performance.now();
 		let processed = 0;
-		Layers.beginFrame(); // descriptors and ancestor style queries are shared by every box of this frame
+		Layers.beginFrame();
 		try {
 			for (let i = 0; i < dirty.length; i++) {
 				const k = dirty[i];
@@ -625,10 +737,13 @@
 	}
 
 	function settle(rec, R, fullyInView, ep) {
+		rec.lastL = R.left;
+		rec.lastT = R.top;
 		rec.lastW = R.width;
 		rec.lastH = R.height;
-		// update() only runs for records that are not clean, so a partly visible box stays unsettled
-		// (it is completed when fully in view) even if it was settled in an older epoch.
+		const snap = copyRect(R);
+		rec.rect = snap;
+		rec.prevRect = snap;
 		rec.settled = fullyInView;
 		rec.epoch = ep;
 		rec.renderedAt = performance.now();
@@ -636,26 +751,13 @@
 
 	function update(rec, R, fullyInView, activeCount) {
 		const t0 = performance.now(), el = rec.el, cfg = svc('config'), ep = epoch;
-		const compositor = svc('compositor');
+		const compositor = svc('compositor'), Halo = svc('halo');
 
-		/*
-		console.log('[ipax-backdrop:telemetry] update() ENTER:', {
-			tag: el.tagName,
-			className: el.className,
-			id: el.id || null,
-			epoch: ep,
-			fullyInView,
-			activeCount,
-			rect: { left: Math.round(R.left), top: Math.round(R.top), width: Math.round(R.width), height: Math.round(R.height) }
-		});
-		*/
-
-		const area = R.width * R.height;
 		const vw = window.innerWidth;
 		const vh = window.innerHeight;
 		const viewportArea = vw * vh;
 
-		if (area > viewportArea) {
+		if (R.width * R.height > viewportArea) {
 			compositor.clear(rec);
 			warnOnce(el, 'Element area exceeds viewport area. Bypassing to protect performance.');
 			settle(rec, R, true, ep);
@@ -670,27 +772,52 @@
 		}
 
 		const params = svc('reader').readParams(el);
-		/*
-		console.log('[ipax-backdrop:telemetry] update() PARAMS:', {
-			className: el.className,
-			text: (el.textContent || '').trim().slice(0, 24),
-			ok: params.ok,
-			ratio: params.ratio,
-			blur: params.blur,
-			mode: params.mode
-		});
-		*/
 		if (!params.ok) { compositor.clear(rec); warnOnce(el, params.reason); settle(rec, R, true, ep); return; }
-		lastMessage.delete(el);
+		if (params.warnings && params.warnings.length) warnOnce(el, params.warnings.join(' '));
+		else lastMessage.delete(el);
 
-		if (params.ratio <= 1.05 && params.blur === 0) {
-			/* console.log('[ipax-backdrop:telemetry] update() EXIT -> BYPASS:', el.className); */
+		const reExt = (ext) => { if (compositor.setExt(rec, ext)) R = rec.layer.getBoundingClientRect(); };
+
+		const tp = params.text;
+		const textOn = tp && tp.on && (tp.ratio > 1 || tp.blur > 0);
+		const boxCover = params.ratio > 1 || params.blur > 0;
+
+		if (!textOn && params.ratio <= 1.05 && params.blur === 0) {
+			reExt(ZERO_EXT);
 			compositor.clear(rec);
 			settle(rec, R, fullyInView, ep);
 			emit('updated', { element: el, ms: performance.now() - t0, backend: 'bypass', stats: null, resolver: null, tainted: false, params, budget: null });
 			return;
 		}
 
+		const tH0 = performance.now();
+		const colors = svc('reader-text').readColors(el, ZERO_RECT, params.color, textOn);
+		if (colors.truncated) warnOnce(el, 'More than ' + svc('limits').maxRuns + ' differently coloured text runs: the extra ones use the base colour.');
+
+		let reach = 0;
+		if (textOn) {
+			const x = rec.ext;
+			const E = { left: R.left + x.l, top: R.top + x.t, right: R.right - x.r, bottom: R.bottom - x.b };
+			const ext = Halo.extent(colors.texts, tp, E, cfg.haloMaxExtend || 400, x);
+			reach = ext.reach;
+			reExt(ext);
+			if (R.width * R.height > viewportArea) {
+				compositor.clear(rec);
+				warnOnce(el, 'Element area plus its --ipax-text reach exceeds viewport area. Bypassing to protect performance.');
+				settle(rec, R, true, ep);
+				return;
+			}
+			if (tp.mode === 'tricontrast' && tp.ratio > 1 && !svc('contrast').band(tp.ratio).ok) {
+				if (!rec.bandWarned) { rec.bandWarned = true; warnOnce(el, '--ipax-text contrast ' + tp.ratio.toFixed(1) + ' is above the tricontrast limit (about 4.5): the text contour cannot reach it in this mode.'); }
+			} else rec.bandWarned = false;
+		} else reExt(ZERO_EXT);
+
+		const dx = -R.left, dy = -R.top;
+		for (const r of colors.runs) { r.x0 += dx; r.x1 += dx; r.y0 += dy; r.y1 += dy; }
+		if (colors.texts) for (const t of colors.texts) { t.x0 += dx; t.x1 += dx; t.y0 += dy; t.y1 += dy; }
+		const ox = rec.ext.l, oy = rec.ext.t, bw = R.width - rec.ext.l - rec.ext.r, bh = R.height - rec.ext.t - rec.ext.b;
+
+		const area = R.width * R.height;
 		const maxScale = Math.min(params.maxPixelScale, window.devicePixelRatio || 1);
 		let s = maxScale;
 
@@ -699,7 +826,6 @@
 			if (!st) { st = { fixedMs: 5.0, pxPerMs: 10000, warmedUp: false }; perfState.set(el, st); }
 
 			let maxP = params.minBudget;
-
 			if (st.warmedUp) {
 				const frameBudgetMs = (1000 / params.performance) / (activeCount || 1);
 				const availMs = Math.max(0, frameBudgetMs - st.fixedMs);
@@ -711,34 +837,43 @@
 
 		const w = Math.max(1, Math.ceil(R.width * s)), h = Math.max(1, Math.ceil(R.height * s));
 
-		const colors = svc('reader-text').readColors(el, R, params.color);
-		if (colors.truncated) warnOnce(el, 'More than ' + svc('limits').maxRuns + ' differently coloured text runs: the extra ones use the base colour.');
-
 		const baseStep = Math.max(4, cfg.cellSize);
 		const viewportCells = Math.ceil(vw / baseStep) * Math.ceil(vh / baseStep);
-		const localStep = Math.max(baseStep, Math.ceil(Math.sqrt(area / viewportCells)));
+		const areaStep = Math.min(baseStep * 2, Math.round(Math.sqrt(area) / 22));
+		const localStep = Math.max(baseStep, areaStep, Math.ceil(Math.sqrt(area / viewportCells)));
+
+		let haloIn = null, active;
+		if (textOn) {
+			const mask = Halo.mask(rec, colors.texts, tp, R.width, R.height, s);
+			haloIn = {
+				ratio: tp.ratio,
+				mode: tp.mode,
+				blur: tp.blur,
+				shared: tp.ratio === params.ratio && tp.mode === params.mode,
+				mask
+			};
+			const nx = Math.ceil(R.width / localStep), ny = Math.ceil(R.height / localStep);
+			active = Halo.activeCells(colors.texts, tp, ox, oy, bw, bh, nx, ny, localStep, boxCover);
+		}
 
 		const tA = performance.now();
-		const res = svc('resolver').resolve(rec, R, s, w, h, localStep);
+		const res = svc('resolver').resolve(rec, R, s, w, h, localStep, active);
 		const tB = performance.now();
-		/*
-		console.log('[ipax-backdrop:telemetry] update() RESOLVED:', {
-			className: el.className,
-			text: (el.textContent || '').trim().slice(0, 24),
-			stats: res.stats,
-			why: Array.from(res.why || [])
-		});
-		*/
-		// The record is passed so the blur reuses its output canvas.
-		const estBlur = params.blur > 0 ? svc('blur').blur(res.est, w, h, params.blur * s, rec) : null;
+
+		const boxBlur = boxCover ? params.blur : 0;
+		const textBlur = textOn ? tp.blur : 0;
+		const maxBlur = Math.max(boxBlur, textBlur);
+		const estBlur = maxBlur > 0 ? svc('blur').blur(res.est, w, h, maxBlur * s, rec) : null;
 		const tC = performance.now();
 
-		const out = svc('kernel').render({ est: res.est, estBlur, grid: res.grid, w, h, s, W: R.width, H: R.height, params, colors });
+		const out = svc('kernel').render({
+			est: res.est, estBlur, grid: res.grid, w, h, s, W: bw, H: bh, ox, oy, params, colors,
+			halo: haloIn, boxCover, boxBlur, textBlur, maxBlur, infl: Math.max(6, reach)
+		});
 		const tD = performance.now();
-		compositor.draw(rec, w, h, out, params.blur);
+		compositor.draw(rec, w, h, out, boxBlur);
 		const tE = performance.now();
 
-		// Drawn while an image was still loading: redo it when the image arrives.
 		rec.waitImg = !!(res.why && res.why.has('image not loaded'));
 		settle(rec, R, fullyInView, ep);
 
@@ -763,7 +898,8 @@
 
 		emit('updated', {
 			element: el, ms, backend: out.backend, stats: out.stats, resolver: res.stats, tainted: !!out.tainted, params, budget: { s, w, h },
-			stages: { resolve: tB - tA, blur: tC - tB, kernel: tD - tC, draw: tE - tD }
+			halo: textOn ? { ext: { l: rec.ext.l, t: rec.ext.t, r: rec.ext.r, b: rec.ext.b }, reach } : null,
+			stages: { read: tA - tH0, resolve: tB - tA, blur: tC - tB, kernel: tD - tC, draw: tE - tD }
 		});
 	}
 
@@ -786,6 +922,14 @@
 
 	function attachAll() {
 		const compositor = svc('compositor');
+		const removed = compositor.pruneDisconnected ? compositor.pruneDisconnected() : [];
+		if (removed.length) {
+			records = records.filter((r) => removed.indexOf(r) < 0);
+			for (let i = 0; i < removed.length; i++) {
+				visibleRecords.delete(removed[i]);
+				if (removed[i].prevRect) unsettleOverlapping(removed[i].prevRect, removed[i].z);
+			}
+		}
 		if (!visibilityObserver && typeof IntersectionObserver !== 'undefined') {
 			visibilityObserver = new IntersectionObserver(handleIntersection, { rootMargin: '50px 0px' });
 		}
@@ -794,8 +938,14 @@
 			if (records.indexOf(rec) < 0) {
 				rec.settled = false;
 				rec.epoch = -1;
+				rec.lastL = 0;
+				rec.lastT = 0;
 				rec.lastW = 0;
 				rec.lastH = 0;
+				rec.rect = null;
+				rec.prevRect = null;
+				rec.z = 0;
+				rec.domOrder = 0;
 				rec.renderedAt = 0;
 				rec.waitImg = false;
 				records.push(rec);
@@ -803,33 +953,71 @@
 				else visibleRecords.add(rec);
 			}
 		});
+		if (compositor.refreshOrder) compositor.refreshOrder();
 	}
 
 	function handleMutations(mutations) {
 		if (!running) return;
-		const N = svc('names');
-		const layerTag = N.layerTag.toUpperCase();
-		let dirtyAttr = false, dirtyTree = false;
+		const N = svc('names'), comp = svc('compositor');
+		const layerTag = N.layerTag.toUpperCase(), planeTag = (N.planeTag || 'ipax-backdrop-plane').toUpperCase();
+		const hostSel = '[' + N.managedAttr + ']';
+		let dirtyGlobal = false, dirtyTree = false, local = false;
+
 		for (let i = 0; i < mutations.length; i++) {
 			const m = mutations[i], t = m.target;
-			if (!t || t.nodeType !== 1) continue;
-			if (t.tagName === layerTag || (t.closest && t.closest(N.layerTag))) continue;
+			if (!t) continue;
+
+			if (m.type === 'characterData') {
+				const pe = t.parentElement;
+				if (!pe || pe.closest(N.layerTag) || pe.closest(planeTag)) continue;
+				const host = pe.closest(hostSel), rec = host && comp.recordFor(host);
+				if (rec) { unsettleRecord(rec); local = true; }
+				continue;
+			}
+
+			if (t.nodeType !== 1) continue;
+			if (t.tagName === layerTag || t.tagName === planeTag || (t.closest && (t.closest(N.layerTag) || t.closest(planeTag)))) continue;
+
 			if (m.type === 'attributes') {
 				if (m.attributeName === N.managedAttr) continue;
-				dirtyAttr = true;
+				const affected = comp.recordsForTarget ? comp.recordsForTarget(t) : [];
+				if (affected.length) {
+					for (let j = 0; j < affected.length; j++) unsettleRecord(affected[j]);
+					local = true;
+					continue;
+				}
+				if (t === document.documentElement || t === document.body) {
+					dirtyGlobal = true;
+					continue;
+				}
+				const tr = t.getBoundingClientRect();
+				if (tr.width > 0 && tr.height > 0 && unsettleOverlapping(tr)) local = true;
 			} else if (m.type === 'childList') {
+				const host = t.closest(hostSel), rec = host && comp.recordFor(host);
+				if (rec) { unsettleRecord(rec); local = true; continue; }
 				for (let j = 0; j < m.addedNodes.length; j++) {
 					const n = m.addedNodes[j];
-					if (n.nodeType === 1 && n.tagName !== layerTag && !n.hasAttribute('data-ipax-backdrop-style')) { dirtyTree = true; dirtyAttr = true; break; }
+					if (n.nodeType === 1 && n.tagName !== layerTag && n.tagName !== planeTag && !n.hasAttribute('data-ipax-backdrop-style')) {
+						dirtyTree = true;
+						break;
+					}
 				}
 				for (let j = 0; j < m.removedNodes.length; j++) {
 					const n = m.removedNodes[j];
-					if (n.nodeType === 1 && n.tagName !== layerTag) { dirtyTree = true; dirtyAttr = true; break; }
+					if (n.nodeType === 1 && n.tagName !== layerTag && n.tagName !== planeTag) {
+						dirtyTree = true;
+						break;
+					}
+				}
+				if (!dirtyTree && t !== document.documentElement && t !== document.body) {
+					const tr = t.getBoundingClientRect();
+					if (tr.width > 0 && tr.height > 0 && unsettleOverlapping(tr)) local = true;
 				}
 			}
 		}
-		if (dirtyTree) attachAll();
-		if (dirtyAttr) invalidateAll();
+		if (dirtyTree) { attachAll(); local = true; }
+		if (dirtyGlobal) invalidateAll();
+		else if (local) schedule();
 	}
 
 	function start() {
@@ -843,9 +1031,14 @@
 		window.addEventListener('scroll', onScroll, { passive: true });
 		if (!domObserver && typeof MutationObserver !== 'undefined' && document.body) {
 			domObserver = new MutationObserver(handleMutations);
-			domObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'class', svc('names').markerAttr] });
+			domObserver.observe(document.body, {
+				subtree: true,
+				childList: true,
+				characterData: true,
+				attributes: true,
+				attributeFilter: ['style', 'class', svc('names').markerAttr, svc('names').textMarkerAttr]
+			});
 		}
-		// If fonts are already loaded, 'ready' resolves at once and would only force a redundant pass.
 		if (document.fonts && document.fonts.ready && document.fonts.status !== 'loaded') document.fonts.ready.then(invalidateAll);
 		sweepTimer = setInterval(() => { svc('compositor').sweep(visibleRecords, cfg.releaseAfterMs || 4000); }, 2000);
 		emit('ready', {});
@@ -863,6 +1056,7 @@
 		if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
 		if (imgTimer) { clearTimeout(imgTimer); imgTimer = null; }
 		if (throttleTimer) { clearTimeout(throttleTimer); throttleTimer = null; }
+		if (scrollEndTimer) { clearTimeout(scrollEndTimer); scrollEndTimer = null; }
 		svc('compositor').detachAll();
 		records = [];
 		visibleRecords.clear();
@@ -880,38 +1074,41 @@
 ;
 
 /* --- src/1000-lector.js --- */
+// PATH: src/1000-lector.js
 /**
  * ipax-backdrop / 1000-lector.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 1 - READER: turns CSS into parameters. It never touches pixels.
+ * CHAPTER 1 - READER: turns CSS custom properties into solver parameters.
+ *
+ * Supports two independent, composable CSS families plus shared mode:
+ *   Container: --ipax-backdrop (shorthand) & --ipax-backdrop-{contrast,blur,feather,feather-*,mode}
+ *   Text:      --ipax-text (shorthand)     & --ipax-text-{x,y,halo,spread,contrast,blur,mode}
+ *   Shared:    --ipax-mode (default | tricontrast)
  *
  * Service 'ipax-backdrop:reader':
- *   scan()            -> Element[]   elements that declare --ipax-backdrop-* in a
- *                                    style rule, plus elements carrying the
- *                                    data-ipax-backdrop attribute.
- *   readParams(el)    -> {ok, reason, ratio, mode, feather, color}
- *
- * Values are read with getComputedStyle, so the normal CSS cascade, media
- * queries, inheritance and inline styles all apply.
- *
- * Stylesheets that cannot be read (cross-origin without CORS, or any linked
- * file opened from file://) are skipped with a warning. Their elements are
- * still found if they carry the data-ipax-backdrop attribute.
+ *   scan()         -> Element[]
+ *   readParams(el) -> {ok, reason, warnings, ratio, mode, feather, blur, text, color, ...}
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
+	const MODES = new Set(['default', 'tricontrast']);
 
 	function scan() {
 		const N = svc('names'), sels = new Set();
 		let unreadable = 0;
+		const hasProp = (txt) => (
+			txt.indexOf(N.boxShorthand) >= 0 ||
+			txt.indexOf(N.textShorthand) >= 0 ||
+			txt.indexOf(N.modeProp) >= 0
+		);
 		const walk = (rules) => {
 			for (const r of rules) {
-				if (r.cssRules && !r.selectorText) walk(r.cssRules); // @media, @supports, @layer...
-				else if (r.selectorText && r.cssText.indexOf(N.propPrefix) >= 0) sels.add(r.selectorText);
+				if (r.cssRules && !r.selectorText) walk(r.cssRules);
+				else if (r.selectorText && hasProp(r.cssText)) sels.add(r.selectorText);
 			}
 		};
 		for (const sh of document.styleSheets) {
@@ -919,49 +1116,36 @@
 		}
 		const found = new Set();
 		sels.forEach((s) => { try { document.querySelectorAll(s).forEach((e) => found.add(e)); } catch (e) { /* invalid selector */ } });
-		document.querySelectorAll('[' + N.markerAttr + ']').forEach((e) => found.add(e));
-		if (unreadable) window.j0.bus.emit('ipax-backdrop:warning', { message: unreadable + ' stylesheet(s) could not be read (cross-origin or file://). Elements declared only there need the ' + N.markerAttr + ' attribute.' });
+		document.querySelectorAll('[' + N.markerAttr + '], [' + N.textMarkerAttr + ']').forEach((e) => found.add(e));
+		if (unreadable) window.j0.bus.emit('ipax-backdrop:warning', { message: unreadable + ' stylesheet(s) could not be read (cross-origin or file://). Elements declared only there need ' + N.markerAttr + ' or ' + N.textMarkerAttr + '.' });
 		return Array.from(found).filter((el) => el.parentNode && !el.closest(N.layerTag));
 	}
 
-	function parseFeather(shorthand, topStr, rightStr, bottomStr, leftStr) {
-		let t = 0, r = 0, b = 0, l = 0;
-		if (shorthand) {
-			const tokens = shorthand.split(/[\s,]+/).filter(Boolean);
-			const vals = [];
-			for (let i = 0; i < tokens.length; i++) {
-				const num = parseFloat(tokens[i]);
-				if (!isNaN(num)) vals.push(Math.max(0, num));
-			}
-			if (vals.length === 1) {
-				t = r = b = l = vals[0];
-			} else if (vals.length === 2) {
-				t = b = vals[0];
-				r = l = vals[1];
-			} else if (vals.length === 3) {
-				t = vals[0];
-				r = l = vals[1];
-				b = vals[2];
-			} else if (vals.length >= 4) {
-				t = vals[0];
-				r = vals[1];
-				b = vals[2];
-				l = vals[3];
-			}
-		}
+	function parseLengthPx(raw, rootFontPx) {
+		const s = String(raw || '').trim();
+		if (s === '0') return 0;
+		const m = /^([+-]?(?:\d+\.?\d*|\.\d+))(px|rem|em)$/i.exec(s);
+		if (!m) return null;
+		const n = parseFloat(m[1]);
+		const u = m[2].toLowerCase();
+		if (u === 'px') return n;
+		return n * (rootFontPx || 16);
+	}
 
-		const override = (valStr, current) => {
-			if (!valStr) return current;
-			const num = parseFloat(valStr);
-			return (!isNaN(num) && num >= 0) ? num : current;
-		};
+	function parseLengthOrBarePx(raw, rootFontPx) {
+		const len = parseLengthPx(raw, rootFontPx);
+		if (len !== null) return len;
+		const s = String(raw || '').trim();
+		if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) return parseFloat(s);
+		return null;
+	}
 
-		return {
-			top: override(topStr, t),
-			right: override(rightStr, r),
-			bottom: override(bottomStr, b),
-			left: override(leftStr, l)
-		};
+	function expandSides(vals) {
+		if (!vals.length) return { top: 0, right: 0, bottom: 0, left: 0 };
+		if (vals.length === 1) return { top: vals[0], right: vals[0], bottom: vals[0], left: vals[0] };
+		if (vals.length === 2) return { top: vals[0], right: vals[1], bottom: vals[0], left: vals[1] };
+		if (vals.length === 3) return { top: vals[0], right: vals[1], bottom: vals[2], left: vals[1] };
+		return { top: vals[0], right: vals[1], bottom: vals[2], left: vals[3] };
 	}
 
 	function parsePerf(s, def) {
@@ -978,25 +1162,187 @@
 		return isNaN(v) ? def : Math.max(0, v);
 	}
 
+	function parseBoxParams(cs, sharedMode, rootFontPx, hasTextDecl) {
+		const N = svc('names'), K = svc('contrast');
+		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
+		const sh = cs.getPropertyValue(N.boxShorthand).trim();
+		const cLong = get('contrast');
+		const bLong = get('blur');
+		const fLong = get('feather');
+		const ftLong = get('feather-top'), frLong = get('feather-right'), fbLong = get('feather-bottom'), flLong = get('feather-left');
+		const mLong = get('mode').toLowerCase();
+
+		const hasBoxDecl = !!(sh || cLong || bLong || fLong || ftLong || frLong || fbLong || flLong);
+		const warnings = [];
+		let ok = true, reason = '';
+		let ratio = (!hasBoxDecl && hasTextDecl) ? 1 : 4.5;
+		let blur = 0;
+		let feather = { top: 0, right: 0, bottom: 0, left: 0 };
+		let mode = sharedMode;
+
+		if (sh) {
+			ratio = 4.5;
+			const lengths = [];
+			for (const tok of sh.split(/[\s,]+/).filter(Boolean)) {
+				const low = tok.toLowerCase();
+				if (MODES.has(low)) { mode = low; continue; }
+				const len = parseLengthPx(tok, rootFontPx);
+				if (len !== null) { lengths.push(Math.max(0, len)); continue; }
+				const c = K.parseContrast(tok, 4.5);
+				if (!c.ok) { ok = false; reason = c.reason; }
+				else {
+					ratio = c.ratio;
+					if (c.warning) warnings.push(c.warning);
+				}
+			}
+			if (lengths.length >= 1) blur = lengths[0];
+			if (lengths.length >= 2) feather = expandSides(lengths.slice(1, 5));
+		}
+
+		if (cLong) {
+			const c = K.parseContrast(cLong, 4.5);
+			if (!c.ok) { ok = false; reason = c.reason; }
+			else {
+				ratio = c.ratio;
+				if (c.warning) warnings.push(c.warning);
+			}
+		}
+
+		if (bLong) {
+			const b = parseLengthOrBarePx(bLong, rootFontPx);
+			if (b !== null) blur = Math.max(0, b);
+		}
+
+		if (fLong) {
+			const sides = [];
+			for (const tok of fLong.split(/[\s,]+/).filter(Boolean)) {
+				const v = parseLengthOrBarePx(tok, rootFontPx);
+				if (v !== null) sides.push(Math.max(0, v));
+			}
+			if (sides.length) feather = expandSides(sides.slice(0, 4));
+		}
+
+		const overrideSide = (raw, cur) => {
+			if (!raw) return cur;
+			const v = parseLengthOrBarePx(raw, rootFontPx);
+			return (v !== null && v >= 0) ? v : cur;
+		};
+		feather.top = overrideSide(ftLong, feather.top);
+		feather.right = overrideSide(frLong, feather.right);
+		feather.bottom = overrideSide(fbLong, feather.bottom);
+		feather.left = overrideSide(flLong, feather.left);
+
+		if (MODES.has(mLong)) mode = mLong;
+
+		return { ok, reason, warnings, ratio, blur, feather, mode };
+	}
+
+	function parseTextParams(cs, sharedMode, rootFontPx) {
+		const N = svc('names'), K = svc('contrast');
+		const get = (n) => cs.getPropertyValue(N.textPrefix + n).trim();
+		const sh = cs.getPropertyValue(N.textShorthand).trim();
+		const xLong = get('x'), yLong = get('y'), hLong = get('halo'), sLong = get('spread');
+		const cLong = get('contrast'), bLong = get('blur'), mLong = get('mode').toLowerCase();
+
+		const hasDecl = !!(sh || xLong || yLong || hLong || sLong || cLong || bLong || mLong);
+		const warnings = [];
+		let ok = true, reason = '';
+		const out = {
+			on: false,
+			x: 0,
+			y: 0,
+			halo: 0,
+			spread: { v: 0, unit: 'px' },
+			ratio: 1,
+			blur: 0,
+			mode: sharedMode
+		};
+
+		if (sh) {
+			const preLengths = [], postLengths = [];
+			let seenContrast = false;
+			for (const tok of sh.split(/[\s,]+/).filter(Boolean)) {
+				const low = tok.toLowerCase();
+				if (MODES.has(low)) { out.mode = low; continue; }
+				const mPct = /^([+-]?(?:\d+\.?\d*|\.\d+))%$/.exec(tok);
+				if (mPct) {
+					out.spread = { v: Math.max(0, Math.min(100, parseFloat(mPct[1]))), unit: '%' };
+					continue;
+				}
+				const len = parseLengthPx(tok, rootFontPx);
+				if (len !== null) {
+					if (!seenContrast) preLengths.push(len);
+					else postLengths.push(Math.max(0, len));
+					continue;
+				}
+				const c = K.parseContrast(tok, 1);
+				seenContrast = true;
+				if (!c.ok) { ok = false; reason = '--ipax-text: ' + c.reason; }
+				else {
+					out.ratio = c.ratio;
+					if (c.warning) warnings.push(c.warning);
+				}
+			}
+			if (preLengths.length >= 1) out.x = preLengths[0];
+			if (preLengths.length >= 2) out.y = preLengths[1];
+			if (preLengths.length >= 3) out.halo = Math.max(0, preLengths[2]);
+			if (postLengths.length >= 1) out.blur = postLengths[0];
+			if (postLengths.length >= 2) out.spread = { v: postLengths[1], unit: 'px' };
+		}
+
+		const xv = parseLengthOrBarePx(xLong, rootFontPx);
+		if (xv !== null) out.x = xv;
+		const yv = parseLengthOrBarePx(yLong, rootFontPx);
+		if (yv !== null) out.y = yv;
+		const hv = parseLengthOrBarePx(hLong, rootFontPx);
+		if (hv !== null) out.halo = Math.max(0, hv);
+		const bv = parseLengthOrBarePx(bLong, rootFontPx);
+		if (bv !== null) out.blur = Math.max(0, bv);
+
+		if (cLong) {
+			const c = K.parseContrast(cLong, 1);
+			if (!c.ok) { ok = false; reason = '--ipax-text-contrast: ' + c.reason; }
+			else {
+				out.ratio = c.ratio;
+				if (c.warning) warnings.push(c.warning);
+			}
+		}
+
+		if (sLong) {
+			const mPct = /^([+-]?(?:\d+\.?\d*|\.\d+))%$/.exec(sLong);
+			if (mPct) {
+				out.spread = { v: Math.max(0, Math.min(100, parseFloat(mPct[1]))), unit: '%' };
+			} else {
+				const sv = parseLengthOrBarePx(sLong, rootFontPx);
+				if (sv !== null) out.spread = { v: Math.max(0, sv), unit: 'px' };
+			}
+		}
+
+		if (MODES.has(mLong)) out.mode = mLong;
+		out.on = hasDecl && (out.ratio > 1 || out.blur > 0);
+
+		return { ok, reason, warnings, spec: out, hasDecl };
+	}
+
 	function readParams(el) {
 		const N = svc('names'), cs = getComputedStyle(el), cfg = svc('config');
 		const get = (n) => cs.getPropertyValue(N.propPrefix + n).trim();
-		const c = svc('contrast').parseContrast(get('contrast'));
-		const feather = parseFeather(
-			get('feather'),
-			get('feather-top'),
-			get('feather-right'),
-			get('feather-bottom'),
-			get('feather-left')
-		);
-		const b = parseFloat(get('blur'));
+		const rootFontPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+		const rawSharedMode = cs.getPropertyValue(N.modeProp).trim().toLowerCase();
+		const sharedMode = MODES.has(rawSharedMode) ? rawSharedMode : 'default';
+
+		const txt = parseTextParams(cs, sharedMode, rootFontPx);
+		const box = parseBoxParams(cs, sharedMode, rootFontPx, txt.hasDecl);
+
 		return {
-			ok: c.ok,
-			reason: c.reason || '',
-			ratio: c.ratio || 4.5,
-			mode: get('mode').toLowerCase() === 'tricontrast' ? 'tricontrast' : 'default',
-			feather,
-			blur: b > 0 ? b : 0,
+			ok: box.ok && txt.ok,
+			reason: box.reason || txt.reason,
+			warnings: box.warnings.concat(txt.warnings),
+			ratio: box.ratio,
+			mode: box.mode,
+			feather: box.feather,
+			blur: box.blur,
+			text: txt.spec,
 			color: cs.color,
 			performance: parsePerf(get('performance'), cfg.performance),
 			minBudget: parseNum(get('budget-min'), cfg.minBudget),
@@ -1011,24 +1357,20 @@
 ;
 
 /* --- src/1100-lector-texto.js --- */
+// PATH: src/1100-lector-texto.js
 /**
  * ipax-backdrop / 1100-lector-texto.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 1 - READER (text): which colours does the text inside the element have?
+ * CHAPTER 1 - READER (text): text colour runs and calibrated per-word glyph boxes.
  *
  * Service 'ipax-backdrop:reader-text':
- *   readColors(el, rect, baseColorStr) -> {base:[r,g,b], runs:[{x0,y0,x1,y1,c}], truncated}
+ *   readColors(el, rect, baseColorStr, wantTexts)
+ *     -> {base:[r,g,b], runs:[{x0,y0,x1,y1,c}], truncated, texts}
  *
- * The base colour is the computed `color` of the element. A "run" is a text
- * node whose colour differs from the base (for example a <b> or <span> with
- * another colour). Run rectangles are relative to `rect` (the element box),
- * in CSS pixels, one rectangle per line box. Only limits.maxRuns rectangles
- * are kept; `truncated` tells the orchestrator when some were dropped.
- *
- * Why runs matter: white text needs a darker backdrop and black text a lighter
- * one. Each run asks for its own correction, blended smoothly with its
- * neighbours by the kernel.
+ * When `wantTexts` is true (--ipax-text active), `texts` records per-word line rects
+ * along with the computed font stack, letter-spacing and text-transform so the glyph
+ * mask rasterizer (2400-resolutor-halo.js) aligns 1:1 with browser glyph rendering.
  */
 (function () {
 	'use strict';
@@ -1036,25 +1378,73 @@
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
-	function readColors(el, rect, baseStr) {
+	function readColors(el, rect, baseStr, wantTexts) {
 		const C = svc('color'), max = svc('limits').maxRuns;
 		const toRgb = (str) => { const c = C.parseCssColor(str); return c ? [c[0], c[1], c[2]] : [255, 255, 255]; };
-		const base = toRgb(baseStr), runs = [];
+		const base = toRgb(baseStr), runs = [], texts = wantTexts ? [] : null;
 		let truncated = false;
 		const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), range = document.createRange();
 		let node;
+
 		while ((node = tw.nextNode())) {
-			if (!node.nodeValue.trim()) continue;
-			const c = toRgb(getComputedStyle(node.parentElement).color);
-			if (Math.abs(c[0] - base[0]) + Math.abs(c[1] - base[1]) + Math.abs(c[2] - base[2]) < 24) continue;
-			range.selectNodeContents(node);
-			for (const r of range.getClientRects()) {
-				if (r.width <= 0 || r.height <= 0) continue;
-				if (runs.length >= max) { truncated = true; continue; }
-				runs.push({ x0: r.left - rect.left, y0: r.top - rect.top, x1: r.right - rect.left, y1: r.bottom - rect.top, c });
+			const raw = node.nodeValue;
+			if (!raw || !raw.trim()) continue;
+			const cs = getComputedStyle(node.parentElement);
+			const c = toRgb(cs.color);
+			const differs = Math.abs(c[0] - base[0]) + Math.abs(c[1] - base[1]) + Math.abs(c[2] - base[2]) >= 24;
+			if (!differs && !wantTexts) continue;
+
+			if (differs) {
+				range.selectNodeContents(node);
+				for (const r of range.getClientRects()) {
+					if (r.width <= 0 || r.height <= 0) continue;
+					if (runs.length >= max) { truncated = true; break; }
+					runs.push({
+						x0: r.left - rect.left,
+						y0: r.top - rect.top,
+						x1: r.right - rect.left,
+						y1: r.bottom - rect.top,
+						c
+					});
+				}
+			}
+
+			if (wantTexts) {
+				const fs = parseFloat(cs.fontSize) || 16;
+				const fontStyle = cs.fontStyle || 'normal';
+				const fontWeight = cs.fontWeight || '400';
+				const fontFamily = cs.fontFamily || 'sans-serif';
+				const ls = parseFloat(cs.letterSpacing);
+				const letterSpacing = isNaN(ls) ? 0 : ls;
+				const textTransform = cs.textTransform || 'none';
+
+				const re = /\S+/g;
+				let m;
+				while ((m = re.exec(raw))) {
+					range.setStart(node, m.index);
+					range.setEnd(node, m.index + m[0].length);
+					const rects = range.getClientRects();
+					for (let i = 0; i < rects.length; i++) {
+						const r = rects[i];
+						if (r.width <= 0 || r.height <= 0) continue;
+						texts.push({
+							x0: r.left - rect.left,
+							y0: r.top - rect.top,
+							x1: r.right - rect.left,
+							y1: r.bottom - rect.top,
+							word: m[0],
+							fs,
+							fontStyle,
+							fontWeight,
+							fontFamily,
+							letterSpacing,
+							textTransform
+						});
+					}
+				}
 			}
 		}
-		return { base, runs, truncated };
+		return { base, runs, truncated, texts };
 	}
 
 	window.j0.register('ipax-backdrop:reader-text', { readColors });
@@ -1062,6 +1452,7 @@
 ;
 
 /* --- src/2000-resolutor.js --- */
+// PATH: src/2000-resolutor.js
 /**
  * ipax-backdrop / 2000-resolutor.js
  * SPDX-License-Identifier: Apache-2.0
@@ -1070,17 +1461,22 @@
  *
  * The browser does not expose the pixels painted behind an element. The
  * resolver rebuilds an estimate: it probes a grid of points with
- * document.elementsFromPoint, takes the elements BELOW the layer (paint
- * order), asks 'layers' what each one paints, and paints a copy of that onto
- * an off-screen canvas. Areas it cannot reproduce are flagged "unknown".
+ * document.elementsFromPoint, takes the elements BELOW the element/wrapper
+ * (paint order), merges already-computed managed layers below it directly
+ * from the compositor registry, asks 'layers' what each DOM element paints,
+ * and paints a copy onto an off-screen canvas. Areas it cannot reproduce are
+ * flagged "unknown".
  *
  * Service 'ipax-backdrop:resolver':
- *   resolve(rec, R, s, w, h, cell) -> {est, grid, why, stats}
+ *   resolve(rec, R, s, w, h, cell, active?) -> {est, grid, why, stats}
  *     rec    compositor record of the managed element
  *     R      layer rect in client px
  *     s      working scale (working px per client px)
  *     w, h   working canvas size in px
  *     cell   probe cell size in client px
+ *     active Uint8Array(nx*ny) | undefined   cells that can influence the output (1 = probe and paint).
+ *            Cells with 0 are not probed and nothing is painted there (used by the text halo, whose
+ *            layer is larger than the box). nx = ceil(R.width / cell), ny = ceil(R.height / cell).
  *   est    HTMLCanvasElement w x h, the estimated backdrop (opaque).
  *          REUSED: stored in rec.est and overwritten by the next resolve() of
  *          the same record. Callers must consume it synchronously (the pipeline
@@ -1104,10 +1500,14 @@
  * Opaque cut: layers below the first fully opaque known layer are invisible
  * and are ignored, together with anything unknown below them.
  *
+ * Viewport edge: cells outside the viewport are estimated from the nearest visible point of the
+ * layer (edge replication), not marked unknown. They are only "out of view" (unknown) when the whole
+ * layer is outside the viewport.
+ *
  * Known limits: elementsFromPoint is a point sample; elements with
- * pointer-events:none are not listed by the browser, so they are invisible to
- * the resolver (other managed layers are handled through the compositor
- * registry instead).
+ * pointer-events:none are not listed by the browser, so they are handled by
+ * scanning non-managed subtrees in 2100-resolutor-capas.js and through the
+ * compositor layer registry.
  */
 (function () {
 	'use strict';
@@ -1152,10 +1552,12 @@
 		return true;
 	}
 
-	function resolve(rec, R, s, w, h, g) {
+	function resolve(rec, R, s, w, h, g, active) {
 		const t0 = performance.now();
 		const Layers = svc('layers'), Color = svc('color'), Comp = svc('compositor');
-		const layerTag = svc('names').layerTag.toUpperCase();
+		const N_NAMES = svc('names');
+		const layerTag = N_NAMES.layerTag.toUpperCase();
+		const planeTag = (N_NAMES.planeTag || 'ipax-backdrop-plane').toUpperCase();
 		const cfg = svc('config');
 
 		// Reuse the estimate canvas of this record. Assigning width/height reallocates the backing
@@ -1186,25 +1588,113 @@
 
 		const nx = Math.ceil(R.width / g), ny = Math.ceil(R.height / g), N = nx * ny;
 		const V = new Uint8Array(N), done = new Uint8Array(N), sigs = new Array(N), stacks = new Array(N);
-		const cache = new Map(), why = new Set(), taint = new Set();
+		const cache = new Map(), zCache = new Map(), ownerCache = new WeakMap(), fixedCache = new WeakMap(), why = new Set(), taint = new Set();
 		const B = Math.max(1, Math.min(8, Math.floor(cfg.probeBlock === undefined ? 4 : cfg.probeBlock) || 1));
 		let probes = 0;
+
+		// Already-computed managed layers strictly below this record (sorted bottom-to-top).
+		const below = Comp.layersBelow ? Comp.layersBelow(rec, R) : [];
+		const selfRoot = rec.wrapper || rec.el;
+		const stageRoot = rec.plane ? rec.plane.parentElement : null;
+		const hostParent = selfRoot.parentElement;
+		const ownerOf = (e) => {
+			if (!Comp.ownerRecord) return null;
+			if (ownerCache.has(e)) return ownerCache.get(e);
+			const o = Comp.ownerRecord(e) || null;
+			ownerCache.set(e, o);
+			return o;
+		};
+		const isFixed = (e) => {
+			if (!e || e.nodeType !== 1 || e === document.body || e === document.documentElement) return false;
+			if (fixedCache.has(e)) return fixedCache.get(e);
+			const res = getComputedStyle(e).position === 'fixed' || isFixed(e.parentElement);
+			fixedCache.set(e, res);
+			return res;
+		};
+
+		const elemZ = (e) => {
+			if (!e || e.nodeType !== 1) return 0;
+			let v = zCache.get(e);
+			if (v !== undefined) return v;
+			if (stageRoot && e !== stageRoot && stageRoot.contains(e)) {
+				let cur = e;
+				while (cur && cur.parentElement !== stageRoot) cur = cur.parentElement;
+				if (cur) {
+					const z = parseInt(getComputedStyle(cur).zIndex, 10);
+					v = isNaN(z) ? 0 : z;
+					zCache.set(e, v);
+					return v;
+				}
+			}
+			const z = parseInt(getComputedStyle(e).zIndex, 10);
+			v = isNaN(z) ? elemZ(e.parentElement) : z;
+			zCache.set(e, v);
+			return v;
+		};
+
+		// elementsFromPoint returns nothing outside the viewport. A cell whose centre is outside it borrows the
+		// nearest visible point of the layer instead of being "unknown": otherwise the unknown mark (dilated one cell
+		// and interpolated by the kernel) leaks into the visible area as a dark veil at the edge of the screen.
+		const vw1 = document.documentElement.clientWidth - 0.5, vh1 = document.documentElement.clientHeight - 0.5;
+		const act = active && active.length === N ? active : null; // cells that can influence the output (null = all)
+		const NOSTACK = [];
 
 		// Probe one cell: layer stack, "unknown" flag and a signature (ids of the stacked layers).
 		const probe = (i, j) => {
 			const k = j * nx + i;
 			if (done[k]) return;
+			if (act && !act[k]) { done[k] = 1; sigs[k] = ''; stacks[k] = NOSTACK; V[k] = 0; return; } // not needed: no probe, nothing painted
 			probes++;
-			const px = Math.min(R.left + (i + 0.5) * g, R.right - 0.01), py = Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01);
-			const list = document.elementsFromPoint(px, py), idx = list.indexOf(rec.layer);
+			const px = Math.max(0, Math.min(R.left + (i + 0.5) * g, R.right - 0.01, vw1)), py = Math.max(0, Math.min(R.top + (j + 0.5) * g, R.bottom - 0.01, vh1));
+			const list = document.elementsFromPoint(px, py);
 
 			const stack = [];
 			let sig = '', unk = false, cut = false;
-			if (idx < 0) { unk = true; why.add('out of view'); }
-			else {
-				for (let m = idx + 1; m < list.length && !cut; m++) {
+			let bi = below.length - 1; // iterate below layers top-to-bottom
+
+			const flushBelowAbove = (minZ) => {
+				while (bi >= 0 && !cut) {
+					const BL = below[bi];
+					if (minZ !== null && BL.z < minZ) break;
+					bi--;
+					if (!covers(BL, px, py)) continue;
+					stack.push(BL);
+					sig += BL.id + ',';
+				}
+			};
+
+			if (!list.length) {
+				unk = true;
+				why.add('out of view');
+			} else {
+				for (let m = 0; m < list.length && !cut; m++) {
 					const e = list[m];
-					if (e === document.documentElement || e === document.body || e.tagName === layerTag || (e.parentElement && e.parentElement.tagName === layerTag)) continue;
+					if (e === document.documentElement || e === document.body) continue;
+					if (e.tagName === layerTag || e.tagName === planeTag || (e.parentElement && (e.parentElement.tagName === layerTag || e.parentElement.tagName === planeTag))) continue;
+					if (e === selfRoot || selfRoot.contains(e)) continue;
+
+					const owner = ownerOf(e);
+					if (owner && owner !== rec) {
+						if (Comp.isAbove && Comp.isAbove(owner, rec)) continue;
+						// Managed elements sit above the layer plane; their corrected canvas is merged via `below`.
+						if (e === owner.el || owner.el.contains(e)) continue;
+					}
+
+					const ez = elemZ(e);
+					if (isFixed(e) && ez > rec.z) continue;
+					if (stageRoot && stageRoot.contains(e) && e !== stageRoot && ez > rec.z) continue;
+					if (!stageRoot && hostParent && hostParent.contains(e) && e !== hostParent) {
+						let sib = e;
+						while (sib && sib.parentElement !== hostParent) sib = sib.parentElement;
+						if (sib && sib !== selfRoot && sib.tagName !== layerTag) {
+							const sz = elemZ(sib);
+							if (sz > rec.z || (sz === rec.z && (selfRoot.compareDocumentPosition(sib) & Node.DOCUMENT_POSITION_FOLLOWING))) continue;
+						}
+					}
+
+					flushBelowAbove(ez);
+					if (cut) break;
+
 					let Ls = cache.get(e);
 					if (!Ls) { Ls = Layers.layersOf(e, rec); cache.set(e, Ls); }
 					for (const L of Ls) {
@@ -1216,6 +1706,7 @@
 						if (L.a >= 0.999 && !L.nocut) { cut = true; break; }
 					}
 				}
+				if (!cut) flushBelowAbove(null);
 			}
 			if (unk) sig += 'u';
 			V[k] = unk ? 1 : 0; sigs[k] = sig; stacks[k] = stack; done[k] = 1;
@@ -1225,25 +1716,74 @@
 			for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
 				const k = j * nx + i;
 				if (done[k]) continue;
+				if (act && !act[k]) { done[k] = 1; sigs[k] = ''; stacks[k] = NOSTACK; V[k] = 0; continue; }
 				sigs[k] = sigs[k0]; stacks[k] = stacks[k0]; V[k] = V[k0]; done[k] = 1;
 			}
 		};
 
-		Comp.withHitTesting(rec, () => {
-			if (B === 1) {
-				for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) probe(i, j);
-				return;
+		if (B === 1) {
+			for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) probe(i, j);
+		} else {
+			let ai0 = 0, aj0 = 0, ai1 = nx - 1, aj1 = ny - 1;
+			if (act) {
+				ai0 = nx; aj0 = ny; ai1 = -1; aj1 = -1;
+				for (let j = 0; j < ny; j++) {
+					const row = j * nx;
+					for (let i = 0; i < nx; i++) {
+						if (!act[row + i]) continue;
+						if (i < ai0) ai0 = i;
+						if (i > ai1) ai1 = i;
+						if (j < aj0) aj0 = j;
+						if (j > aj1) aj1 = j;
+					}
+				}
 			}
-			for (let bj = 0; bj < ny; bj += B) for (let bi = 0; bi < nx; bi += B) {
-				const ie = Math.min(bi + B, nx), je = Math.min(bj + B, ny); // cells owned by this block: [bi, ie) x [bj, je)
-				const i1 = Math.min(bi + B, nx - 1), j1 = Math.min(bj + B, ny - 1); // corners: the next block's origin, clamped
-				const cx = (bi + ie - 1) >> 1, cy = (bj + je - 1) >> 1;
-				probe(bi, bj); probe(i1, bj); probe(bi, j1); probe(i1, j1); probe(cx, cy);
-				const k0 = bj * nx + bi, s0 = sigs[k0];
-				if (sigs[bj * nx + i1] === s0 && sigs[j1 * nx + bi] === s0 && sigs[j1 * nx + i1] === s0 && sigs[cy * nx + cx] === s0) fill(bi, bj, ie, je, k0);
-				else for (let j = bj; j < je; j++) for (let i = bi; i < ie; i++) probe(i, j);
+
+			let coarseDone = false;
+			if (ai1 < ai0 || aj1 < aj0) {
+				fill(0, 0, nx, ny, 0);
+				coarseDone = true;
+			} else {
+				const ci = [ai0, (ai0 + ai1) >> 1, ai1];
+				const cj = [aj0, (aj0 + aj1) >> 1, aj1];
+				let k0 = -1, uniform = true;
+				for (let qj = 0; qj < 3; qj++) {
+					for (let qi = 0; qi < 3; qi++) {
+						const ii = ci[qi], jj = cj[qj], k = jj * nx + ii;
+						if (act && !act[k]) continue;
+						probe(ii, jj);
+						if (k0 < 0) k0 = k;
+						else if (sigs[k] !== sigs[k0]) uniform = false;
+					}
+				}
+				if (uniform) {
+					fill(0, 0, nx, ny, k0 >= 0 ? k0 : 0);
+					coarseDone = true;
+				}
 			}
-		});
+
+			if (!coarseDone) {
+				for (let bj = 0; bj < ny; bj += B) for (let bi = 0; bi < nx; bi += B) {
+					const ie = Math.min(bi + B, nx), je = Math.min(bj + B, ny);
+					const i1 = Math.min(bi + B, nx - 1), j1 = Math.min(bj + B, ny - 1);
+					if (act) {
+						let any = false;
+						for (let j = bj; j < je && !any; j++) for (let i = bi; i < ie; i++) if (act[j * nx + i]) { any = true; break; }
+						if (!any) { fill(bi, bj, ie, je, bj * nx + bi); continue; }
+					}
+					const ks = [bj * nx + bi, bj * nx + i1, j1 * nx + bi, j1 * nx + i1];
+					let k0 = -1, uniform = true;
+					for (let q = 0; q < 4; q++) {
+						const k = ks[q];
+						if (act && !act[k]) continue;
+						probe(k % nx, (k / nx) | 0);
+						if (k0 < 0) k0 = k; else if (sigs[k] !== sigs[k0]) uniform = false;
+					}
+					if (uniform && k0 >= 0) fill(bi, bj, ie, je, k0);
+					else for (let j = bj; j < je; j++) for (let i = bi; i < ie; i++) probe(i, j);
+				}
+			}
+		}
 
 		// Painting. Neighbouring cells with the same layer stack are painted as one rectangle, and identical
 		// consecutive rows are merged vertically (a uniform box becomes ONE rectangle instead of one per row).
@@ -1300,6 +1840,7 @@
 ;
 
 /* --- src/2100-resolutor-capas.js --- */
+// PATH: src/2100-resolutor-capas.js
 /**
  * ipax-backdrop / 2100-resolutor-capas.js
  * SPDX-License-Identifier: Apache-2.0
@@ -1310,22 +1851,23 @@
  * bottom) the resolver can reproduce on a canvas. Supported:
  *   'col'  background-color, with alpha and inherited opacity
  *   'img'  url() background images and <img> elements (size, position, repeat)
- *   'lay'  the already-computed layer of ANOTHER managed element
  * Everything else becomes an 'unk' layer carrying the reason. The resolver
  * answers "unknown" for any area where an 'unk' layer is visible, and the
  * kernel covers that area with a translucent veil instead of guessing.
+ *
+ * Already-computed managed layers ('lay') are composed directly by
+ * 2000-resolutor.js via compositor.layersBelow(), so container scans never
+ * depend on per-box state and can be cached across all boxes in the frame.
  *
  * Unknown reasons: transform, filter, mix-blend-mode, backdrop-filter (on a
  * non-managed element), pseudo-element with a background, gradient,
  * unsupported background, attachment/origin, image not loaded, geometry,
  * color, object-fit.
  *
- * FRAME CACHE (v0.1.05): between beginFrame() and endFrame() the descriptors of
+ * FRAME CACHE (v0.1.05+): between beginFrame() and endFrame() the descriptors of
  * every NON-managed element, and the inherited-risk chain of every ancestor, are
- * computed once and shared by all managed elements. In a grid where hundreds of
- * boxes sit on the same cells, parents and page wrappers are style-queried once per
- * frame instead of once per box. Managed elements are never cached (their 'lay'
- * layer changes while the frame is processed). Without beginFrame() nothing is cached.
+ * computed once and shared by all managed elements. Subtrees belonging to managed
+ * elements or their stacking wrappers are pruned during pointer-events:none scans.
  *
  * Service 'ipax-backdrop:layers':
  *   layersOf(el, selfRec)   -> descriptor[]   (selfRec is skipped as "own layer")
@@ -1365,6 +1907,15 @@
 		catch (e) { return true; }
 	};
 
+	/** Pure 2D scale/translation matrix (no rotation or skew) used by zoomed stage containers. */
+	function isPureScaleTransform(tr) {
+		if (!tr || tr === 'none') return true;
+		const m = /^matrix\(\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,\s*([-\d.e+]+)\s*,/.exec(tr);
+		if (!m) return false;
+		const a = +m[1], b = +m[2], c = +m[3], d = +m[4];
+		return Math.abs(b) < 1e-6 && Math.abs(c) < 1e-6 && a > 0 && d > 0;
+	}
+
 	/** Effects that cannot be reproduced, plus the opacity accumulated through ancestors (cached per frame). */
 	function riskOf(n) {
 		if (!n || n.nodeType !== 1) return NO_RISK;
@@ -1373,19 +1924,22 @@
 		const Comp = svc('compositor');
 		const c = getComputedStyle(n), parent = riskOf(n.parentElement);
 		let unk = null;
-		if (c.transform !== 'none') unk = 'transform';
-		else if (c.filter !== 'none') unk = 'filter';
-		else if (c.mixBlendMode !== 'normal') unk = 'mix-blend-mode';
+		if (c.transform !== 'none') {
+			const stageZoom = Comp.isStageOrAncestor && Comp.isStageOrAncestor(n) && isPureScaleTransform(c.transform);
+			if (!stageZoom) unk = 'transform';
+		}
+		if (!unk && c.filter !== 'none') unk = 'filter';
+		else if (!unk && c.mixBlendMode !== 'normal') unk = 'mix-blend-mode';
 		// A managed element is expected to have the author's backdrop-filter (that is the glass blur).
-		else if ((c.backdropFilter || c.webkitBackdropFilter || 'none') !== 'none' && !Comp.recordFor(n)) unk = 'backdrop-filter';
+		else if (!unk && (c.backdropFilter || c.webkitBackdropFilter || 'none') !== 'none' && !Comp.recordFor(n)) unk = 'backdrop-filter';
 		// The nearest ancestor that carries an effect wins, as before.
 		r = { unk: unk || parent.unk, op: (+c.opacity) * parent.op };
 		if (riskCache) riskCache.set(n, r);
 		return r;
 	}
 
-	function build(e, selfRec) {
-		const G = svc('css-geometry'), Color = svc('color'), Comp = svc('compositor');
+	function build(e) {
+		const G = svc('css-geometry'), Color = svc('color');
 		const out = [], risk = riskOf(e), mk = (o) => { o.id = ++uid; return o; };
 		if (risk.unk) return [mk({ k: 'unk', why: risk.unk })];
 
@@ -1398,7 +1952,14 @@
 		}
 
 		const cs = getComputedStyle(e), r = e.getBoundingClientRect();
-		const pa = { x: r.left + e.clientLeft, y: r.top + e.clientTop, w: e.clientWidth, h: e.clientHeight };
+		const ow = e.offsetWidth, oh = e.offsetHeight;
+		const sx = ow > 0 ? r.width / ow : 1, sy = oh > 0 ? r.height / oh : 1;
+		const pa = {
+			x: r.left + e.clientLeft * sx,
+			y: r.top + e.clientTop * sy,
+			w: e.clientWidth * sx,
+			h: e.clientHeight * sy
+		};
 
 		if (e.tagName === 'IMG') {
 			if (!(e.complete && e.naturalWidth)) out.push(mk({ k: 'unk', why: 'image not loaded' }));
@@ -1427,38 +1988,40 @@
 		if (!c) out.push(mk({ k: 'unk', why: 'color' }));
 		else if (c[3] > 0) out.push(mk({ k: 'col', c, a: c[3] * risk.op, r }));
 
-		// The layer a managed element has underneath itself paints below its own background.
-		// If the managed element is in Bypass mode (contrast 1, blur 0), its canvas is cleared (width=0).
-		// We must not push an empty canvas, so elementsFromPoint can hit the real DOM elements (like .ed-box-bg) underneath.
-		const rg = Comp.recordFor(e);
-		if (rg && rg.ready && rg !== selfRec && rg.cv.width > 0) out.push({ id: 1e6 + rg.id, k: 'lay', cv: rg.cv, r: rg.layer.getBoundingClientRect(), a: 1, nocut: true });
 		return out;
 	}
 
 	function layersOf(e, selfRec) {
-		const Comp = svc('compositor'), layerTag = svc('names').layerTag.toUpperCase();
+		const Comp = svc('compositor'), N = svc('names');
+		const layerTag = N.layerTag.toUpperCase();
+		const planeTag = (N.planeTag || 'ipax-backdrop-plane').toUpperCase();
 		const isAncestor = !!(selfRec && e.contains(selfRec.el));
-		// Managed elements depend on selfRec and on what has been drawn so far: never cached.
-		let cacheable = frame !== null && !Comp.recordFor(e) && !isAncestor;
+		const isManaged = !!Comp.recordFor(e);
+		const isWrap = !!(Comp.isWrapper && Comp.isWrapper(e));
+		const cacheable = frame !== null && !isManaged && !isWrap && !isAncestor;
 		if (cacheable) { const hit = frame.get(e); if (hit) return hit; }
 
-		let out = [];
-		if (!isAncestor) {
-			try {
-				const descendants = e.querySelectorAll('*');
-				for (let i = descendants.length - 1; i >= 0; i--) {
-					const d = descendants[i];
-					if (d.tagName === layerTag || (d.parentElement && d.parentElement.tagName === layerTag)) continue;
-					if (Comp.recordFor(d)) cacheable = false;
-					const cs = getComputedStyle(d);
-					if (cs.pointerEvents === 'none' && cs.display !== 'none' && parseFloat(cs.opacity) > 0) {
-						out = out.concat(build(d, selfRec));
-					}
+		const out = [];
+		const scanPointerNone = (root) => {
+			for (let d = root.firstElementChild; d; d = d.nextElementSibling) {
+				if (d.tagName === layerTag || d.tagName === planeTag) continue;
+				if (Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d))) continue;
+				const cs = getComputedStyle(d);
+				if (cs.display === 'none' || parseFloat(cs.opacity) <= 0) continue;
+				scanPointerNone(d);
+				if (cs.pointerEvents === 'none') {
+					const items = build(d);
+					for (let i = 0; i < items.length; i++) out.push(items[i]);
 				}
-			} catch (err) {}
+			}
+		};
+
+		if (!isAncestor) {
+			try { scanPointerNone(e); } catch (err) {}
 		}
 
-		out = out.concat(build(e, selfRec));
+		const own = build(e);
+		for (let i = 0; i < own.length; i++) out.push(own[i]);
 		if (cacheable) frame.set(e, out);
 		return out;
 	}
@@ -1734,6 +2297,221 @@
 })();
 ;
 
+/* --- src/2400-resolutor-halo.js --- */
+/**
+ * ipax-backdrop / 2400-resolutor-halo.js
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * CHAPTER 2 - RESOLVER (glyph contour mask): calibrated mask for --ipax-text.
+ *
+ * Builds a low-resolution single-channel mask Mg(x, y) in [0..255] fitted to the
+ * actual rendered glyphs (calibrated per word via Range.getClientRects + TextMetrics),
+ * dilated by `spread` (px additive or % internal) and diffused by `halo` (Gaussian/smoothstep).
+ *
+ * Service 'ipax-backdrop:halo':
+ *   reachOf(tp)                                -> {s, f, reach} in CSS px
+ *   extent(texts, tp, E, cap, cur)             -> {l, t, r, b, reach}
+ *   mask(rec, texts, tp, W, H, scale?)         -> {sig, data:Uint8Array, mw, mh, cs}
+ *   activeCells(texts, tp, ox, oy, bw, bh, nx, ny, g, includeBox) -> Uint8Array(nx*ny)
+ */
+(function () {
+	'use strict';
+	if (!window.j0 || !window.j0.register) return;
+
+	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
+	const MAX_CELLS = 262144; // up to 512 x 512 mask texels
+
+	function applyTransform(word, tf) {
+		if (tf === 'uppercase') return word.toUpperCase();
+		if (tf === 'lowercase') return word.toLowerCase();
+		if (tf === 'capitalize') return word.replace(/\b\w/g, (ch) => ch.toUpperCase());
+		return word;
+	}
+
+	function reachOf(tp) {
+		const haloPx = Math.max(0, tp.halo || 0);
+		const isPct = tp.spread && tp.spread.unit === '%';
+		const rawSpread = tp.spread ? Math.max(0, tp.spread.v || 0) : 0;
+		const s = isPct ? haloPx * (rawSpread / 100) : rawSpread;
+		const f = isPct ? Math.max(0, haloPx - s) : haloPx;
+		return { s, f, reach: s + f };
+	}
+
+	function extent(texts, tp, E, cap, cur) {
+		const q = reachOf(tp), d = q.reach;
+		const ox = tp.x || 0, oy = tp.y || 0;
+		let l = 0, t = 0, r = 0, b = 0;
+		for (let i = 0; i < texts.length; i++) {
+			const T = texts[i];
+			const a = E.left - (T.x0 + ox - d); if (a > l) l = a;
+			const c = (T.x1 + ox + d) - E.right; if (c > r) r = c;
+			const e = E.top - (T.y0 + oy - d); if (e > t) t = e;
+			const f = (T.y1 + oy + d) - E.bottom; if (f > b) b = f;
+		}
+		const fit = (v, old) => {
+			const n = Math.min(cap, Math.max(0, Math.ceil(v - 0.05)));
+			return (old >= n && old - n <= 1) ? old : n;
+		};
+		return { l: fit(l, cur.l), t: fit(t, cur.t), r: fit(r, cur.r), b: fit(b, cur.b), reach: d };
+	}
+
+	function signature(texts, tp, W, H, effScale) {
+		const q = reachOf(tp);
+		let s = Math.round(W) + 'x' + Math.round(H) + '@' + effScale.toFixed(3) +
+			'|' + (tp.x || 0) + ',' + (tp.y || 0) + ',' + q.s.toFixed(2) + ',' + q.f.toFixed(2);
+		for (let i = 0; i < texts.length; i++) {
+			const t = texts[i];
+			s += '|' + Math.round(t.x0) + ',' + Math.round(t.y0) + ',' + Math.round(t.x1) + ',' + Math.round(t.y1) + ':' + (t.word || '');
+		}
+		return s;
+	}
+
+	function buildEuclideanFallback(texts, tp, mw, mh, cs) {
+		const smooth = svc('color').smooth;
+		const q = reachOf(tp), s = q.s, f = q.f, r = q.reach;
+		const ox = tp.x || 0, oy = tp.y || 0;
+		const data = new Uint8Array(mw * mh);
+		if (!(r > 0)) return data;
+
+		for (let n = 0; n < texts.length; n++) {
+			const T = texts[n];
+			const x0 = T.x0 + ox, x1 = T.x1 + ox, y0 = T.y0 + oy, y1 = T.y1 + oy;
+			const j0 = Math.max(0, Math.floor((y0 - r) / cs - 0.5)), j1 = Math.min(mh - 1, Math.ceil((y1 + r) / cs - 0.5));
+			const i0 = Math.max(0, Math.floor((x0 - r) / cs - 0.5)), i1 = Math.min(mw - 1, Math.ceil((x1 + r) / cs - 0.5));
+			for (let j = j0; j <= j1; j++) {
+				const cy = (j + 0.5) * cs, dy = cy < y0 ? y0 - cy : (cy > y1 ? cy - y1 : 0);
+				if (dy > r) continue;
+				const dy2 = dy * dy, row = j * mw;
+				for (let i = i0; i <= i1; i++) {
+					const cx = (i + 0.5) * cs, dx = cx < x0 ? x0 - cx : (cx > x1 ? cx - x1 : 0);
+					const d = Math.sqrt(dx * dx + dy2);
+					let m;
+					if (d <= s) m = 1;
+					else if (f > 0 && d < r) m = smooth(1 - (d - s) / f);
+					else continue;
+					const v = (m * 255 + 0.5) | 0;
+					if (v > data[row + i]) data[row + i] = v;
+				}
+			}
+		}
+		return data;
+	}
+
+	function mask(rec, texts, tp, W, H, scale) {
+		const reqScale = Math.min(2, Math.max(0.5, scale || 1));
+		let mw = Math.max(1, Math.ceil(W * reqScale));
+		let mh = Math.max(1, Math.ceil(H * reqScale));
+		while (mw * mh > MAX_CELLS) {
+			mw = Math.max(1, Math.floor(mw * 0.8));
+			mh = Math.max(1, Math.floor(mh * 0.8));
+		}
+		const effScale = W > 0 ? mw / W : 1;
+		const cs = W > 0 ? W / mw : 1;
+
+		const sig = signature(texts, tp, W, H, effScale);
+		if (rec && rec.halo && rec.halo.sig === sig) return rec.halo;
+
+		const q = reachOf(tp);
+		const cv = document.createElement('canvas');
+		cv.width = mw;
+		cv.height = mh;
+		const ctx = cv.getContext ? cv.getContext('2d', { willReadFrequently: true }) : null;
+
+		if (!ctx || typeof ctx.fillText !== 'function' || typeof ctx.measureText !== 'function') {
+			const fb = { sig, data: buildEuclideanFallback(texts, tp, mw, mh, cs), mw, mh, cs };
+			if (rec) rec.halo = fb;
+			return fb;
+		}
+
+		ctx.fillStyle = '#000';
+		ctx.fillRect(0, 0, mw, mh);
+		ctx.fillStyle = '#fff';
+		ctx.strokeStyle = '#fff';
+		ctx.lineJoin = 'round';
+		ctx.miterLimit = 2;
+
+		const ox = (tp.x || 0) * effScale;
+		const oy = (tp.y || 0) * effScale;
+		const spreadPx = q.s * effScale;
+		const fadePx = q.f * effScale;
+
+		for (let i = 0; i < texts.length; i++) {
+			const T = texts[i];
+			if (!T.word) continue;
+			const domX = T.x0 * effScale;
+			const domY = T.y0 * effScale;
+			const domW = (T.x1 - T.x0) * effScale;
+			const domH = (T.y1 - T.y0) * effScale;
+			if (domW <= 0 || domH <= 0) continue;
+
+			const fontSizePx = (T.fs || 16) * effScale;
+			ctx.font = (T.fontStyle || 'normal') + ' ' + (T.fontWeight || '400') + ' ' + fontSizePx + 'px ' + (T.fontFamily || 'sans-serif');
+			if ('letterSpacing' in ctx) {
+				ctx.letterSpacing = ((T.letterSpacing || 0) * effScale) + 'px';
+			}
+
+			const word = applyTransform(T.word, T.textTransform);
+			const tm = ctx.measureText(word);
+			const cvW = tm && tm.width ? tm.width : domW;
+			const scaleX = (cvW > 0 && Math.abs(cvW - domW) > 0.25) ? (domW / cvW) : 1;
+			const asc = (tm && (tm.fontBoundingBoxAscent || tm.actualBoundingBoxAscent)) || domH * 0.78;
+			const desc = (tm && (tm.fontBoundingBoxDescent || tm.actualBoundingBoxDescent)) || domH * 0.22;
+			const baseY = domY + (domH - (asc + desc)) * 0.5 + asc;
+
+			ctx.save();
+			ctx.translate(domX + ox, baseY + oy);
+			if (scaleX !== 1) ctx.scale(scaleX, 1);
+			if (spreadPx > 0.05) {
+				ctx.lineWidth = (spreadPx * 2) / scaleX;
+				ctx.strokeText(word, 0, 0);
+			}
+			ctx.fillText(word, 0, 0);
+			ctx.restore();
+		}
+
+		let rgba;
+		const sigma = fadePx * 0.5;
+		if (sigma > 0.25) {
+			const blurCv = document.createElement('canvas');
+			blurCv.width = mw;
+			blurCv.height = mh;
+			const bctx = blurCv.getContext('2d', { willReadFrequently: true });
+			bctx.filter = 'blur(' + sigma.toFixed(2) + 'px)';
+			bctx.drawImage(cv, 0, 0);
+			rgba = bctx.getImageData(0, 0, mw, mh).data;
+		} else {
+			rgba = ctx.getImageData(0, 0, mw, mh).data;
+		}
+
+		const data = new Uint8Array(mw * mh);
+		for (let p = 0, n = data.length; p < n; p++) data[p] = rgba[p * 4];
+
+		const out = { sig, data, mw, mh, cs };
+		if (rec) rec.halo = out;
+		return out;
+	}
+
+	function activeCells(texts, tp, ox, oy, bw, bh, nx, ny, g, includeBox) {
+		const a = new Uint8Array(nx * ny);
+		const mark = (x0, y0, x1, y1) => {
+			const i0 = Math.max(0, Math.floor(x0 / g)), i1 = Math.min(nx - 1, Math.floor(x1 / g));
+			const j0 = Math.max(0, Math.floor(y0 / g)), j1 = Math.min(ny - 1, Math.floor(y1 / g));
+			for (let j = j0; j <= j1; j++) { const row = j * nx; for (let i = i0; i <= i1; i++) a[row + i] = 1; }
+		};
+		if (includeBox) mark(ox, oy, ox + bw, oy + bh);
+		const r = reachOf(tp).reach;
+		const tx = tp.x || 0, ty = tp.y || 0;
+		for (let n = 0; n < texts.length; n++) {
+			const T = texts[n];
+			mark(T.x0 + tx - r, T.y0 + ty - r, T.x1 + tx + r, T.y1 + ty + r);
+		}
+		return a;
+	}
+
+	window.j0.register('ipax-backdrop:halo', { reachOf, extent, mask, activeCells });
+})();
+;
+
 /* --- src/3000-kernel.js --- */
 /**
  * ipax-backdrop / 3000-kernel.js
@@ -1749,30 +2527,22 @@
  * CONTRACT (both backends)
  *   render(input) -> {source, stats, tainted}
  *   input = {
- *     est      HTMLCanvasElement  estimated backdrop (w x h), from the resolver
- *     estBlur  HTMLCanvasElement | null   the same estimate blurred (2300). Mixed with `est` by the
- *                                 feather mask before the lightness solve; null = no blur
- *     grid     {V, nx, ny, g}     unknown cells, from the resolver
- *     w, h     working size in px
- *     s        working px per CSS px
- *     W, H     element size in CSS px
- *     params   {ratio, mode, feather, blur}   from the reader. ratio <= 1 (contrast.isBypass) skips the
- *                                 solve and the veil: the output is just the (blurred) estimate
- *     colors   {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}   from reader-text
+ *     est       HTMLCanvasElement  estimated backdrop (w x h), from the resolver
+ *     estBlur   HTMLCanvasElement | null   single-pass blurred estimate at maxBlur * s
+ *     grid      {V, nx, ny, g}     unknown cells, from the resolver
+ *     w, h      working size in px
+ *     s         working px per CSS px
+ *     W, H      BOX size in CSS px
+ *     ox, oy    origin of the box inside the layer, CSS px
+ *     halo      null | {ratio, mode, blur, shared, mask:{data:Uint8Array, mw, mh, cs}}
+ *     boxCover  boolean            false = container inactive; only --ipax-text paints
+ *     boxBlur   number             container image blur in CSS px
+ *     textBlur  number             glyph-contour image blur in CSS px
+ *     maxBlur   number             Math.max(boxBlur, textBlur)
+ *     infl      number             influence radius (CSS px) of a coloured text run, >= 6
+ *     params    {ratio, mode, feather, blur}
+ *     colors    {base:[r,g,b], runs:[{x0,y0,x1,y1,c}]}
  *   }
- *   source   ImageData (CPU) or HTMLCanvasElement (WebGL), w x h. Pixels are
- *            opaque where the backdrop is known and translucent veil where it
- *            is not. NOTE: a WebGL source is only valid until the next render,
- *            so the caller must paint it immediately.
- *   stats    {min, under, nI, nV, inf} measured contrast statistics (CPU only;
- *            null on WebGL, where nothing is read back from the GPU).
- *   tainted  true when the estimate could not be read (cross-origin image);
- *            the whole area then gets the veil.
- *
- * Selection (config.backend): 'auto' tries WebGL and falls back to CPU for
- * good if it is unavailable or throws; 'cpu' never tries WebGL; 'webgl' tries
- * WebGL first but still falls back, because a missing result is worse than a
- * slower one. Every change of backend emits 'ipax-backdrop:backend'.
  *
  * Service 'ipax-backdrop:kernel': render(input), activeBackend()
  */
@@ -1819,27 +2589,16 @@
  * ipax-backdrop / 3100-kernel-cpu.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, CPU backend. The reference implementation: the WebGL
- * backend (3200) must produce the same pixels.
+ * CHAPTER 3 - KERNEL, CPU backend. Reference implementation paired with 3210-kernel-webgl-shaders.js.
  *
- * Per pixel (see 3000-kernel.js for the input/output contract):
- *   1. M      feather mask, 0 at the element edge, 1 `feather` px inside.
- *   2. C      "known" weight: 1 where the backdrop estimate is trustworthy,
- *             falling to 0 inside unknown cells (bilinear over the grid).
- *   3. Image  where C > 0, move the lightness (L of OKLab, a and b fixed) of
- *             the estimated pixel just far enough to reach the contrast:
- *               default      push toward the extreme that contrasts more with
- *                            the text colour (binary search for the first
- *                            crossing, so the change is minimal);
- *               tricontrast  clamp into the luminance band where white AND
- *                            black text both pass.
- *             The result is mixed with the original by M.
- *   4. Veil   where C < 1 a translucent flat colour whose alpha guarantees the
- *             ratio against the WORST possible backdrop (black or white).
- *   Output = known image * C + veil * (1 - C), alpha-weighted.
- *
- * Text runs with another colour (colors.runs) each ask for their own
- * correction; the strongest run weight at a pixel blends the two solutions.
+ * Composition pipeline per pixel:
+ *   1. Mb       box mask (Euclidean feather inside box, 0 outside)
+ *      Mh       calibrated glyph contour mask (0 without --ipax-text)
+ *      mScreen  screen(Mb, Mh) = Mb + Mh - Mb * Mh
+ *   2. Blur     single-pass estBlur mixed by mScreen (if boxBlur === textBlur)
+ *               or max(Mb * boxBlur / maxBlur, Mh * textBlur / maxBlur)
+ *   3. OKLab    continuous sequential lightness adaptation: L0 --(mScreen)--> L1 --(Mh)--> L2
+ *   4. Veil     worst-case contrast veil weighted by max(mScreen * alBox, Mh * alText)
  *
  * Service 'ipax-backdrop:kernel-cpu': available(), render(input)
  */
@@ -1856,21 +2615,49 @@
 		return (gv(ci, cj) * (1 - tx) + gv(ci + 1, cj) * tx) * (1 - ty) + (gv(ci, cj + 1) * (1 - tx) + gv(ci + 1, cj + 1) * tx) * ty;
 	}
 
+	function maskAt(m, rx, ry) {
+		const data = m.data, mw = m.mw, mh = m.mh, cs = m.cs;
+		let fx = rx / cs - 0.5, fy = ry / cs - 0.5;
+		if (fx < 0) fx = 0; else if (fx > mw - 1) fx = mw - 1;
+		if (fy < 0) fy = 0; else if (fy > mh - 1) fy = mh - 1;
+		const i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j;
+		const i1 = i + 1 < mw ? i + 1 : i, j1 = j + 1 < mh ? j + 1 : j;
+		const a = data[j * mw + i], b = data[j * mw + i1], c = data[j1 * mw + i], d = data[j1 * mw + i1];
+		return ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty) / 255;
+	}
+
 	function render(input) {
 		const C = svc('color'), K = svc('contrast');
 		const LUT = C.LUT, clamp01 = C.clamp01, smooth = C.smooth, lum = C.luminance, toSrgb = C.toSrgb255, cr = K.ratio;
 		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
+		const ox = input.ox || 0, oy = input.oy || 0;
+		const halo = input.halo && input.halo.mask ? input.halo : null, haloOn = !!halo;
+		const boxCover = input.boxCover !== false;
+		const infl = input.infl > 6 ? input.infl : 6;
+		const eps = 1 / s;
 
 		let pix = null, blurPix = null, tainted = false;
-		if (est) { 
-			try { 
-				pix = est.getContext('2d').getImageData(0, 0, w, h).data; 
+		if (est) {
+			try {
+				pix = est.getContext('2d').getImageData(0, 0, w, h).data;
 				if (estBlur) blurPix = estBlur.getContext('2d').getImageData(0, 0, w, h).data;
-			} catch (e) { tainted = true; } 
+			} catch (e) { tainted = true; }
 		}
 
 		const out = new Uint8ClampedArray(w * h * 4);
-		const tri = params.mode === 'tricontrast', ratio = params.ratio, rS = K.solveRatio(ratio);
+		const triB = params.mode === 'tricontrast';
+		const ratio = params.ratio, rS = K.solveRatio(ratio), bypassB = K.isBypass(ratio);
+		const rH = haloOn ? halo.ratio : ratio, rSH = K.solveRatio(rH), bypassH = !haloOn || K.isBypass(rH);
+		const triH = haloOn ? ((halo.mode || params.mode) === 'tricontrast') : triB;
+		const shared = haloOn && !!halo.shared;
+
+		const boxBlur = input.boxBlur !== undefined ? input.boxBlur : (params.blur || 0);
+		const textBlur = input.textBlur !== undefined ? input.textBlur : (haloOn ? (halo.blur || 0) : 0);
+		const maxBlur = input.maxBlur !== undefined ? input.maxBlur : Math.max(boxBlur, textBlur);
+		const boxBlurRatio = maxBlur > 0 ? boxBlur / maxBlur : 0;
+		const textBlurRatio = maxBlur > 0 ? textBlur / maxBlur : 0;
+		const sameBlur = Math.abs(boxBlur - textBlur) < 1e-4;
+
 		const fParam = params.feather;
 		const f = (typeof fParam === 'object' && fParam !== null)
 			? fParam
@@ -1880,27 +2667,27 @@
 
 		const runs = colors.runs.slice(0, svc('limits').maxRuns);
 		const pcs = [K.prepareColor(colors.base, rS)].concat(runs.map((r) => K.prepareColor(r.c, rS)));
+		const pcsH = (haloOn && !shared) ? [K.prepareColor(colors.base, rSH)].concat(runs.map((r) => K.prepareColor(r.c, rSH))) : pcs;
 		const band = K.band(ratio), tv = K.bandVeil(band);
+		const bandH = haloOn ? K.band(rH) : band, tvH = haloOn ? K.bandVeil(bandH) : tv;
 		const ok = [0, 0, 0], lin = [0, 0, 0];
 
-		/** Default mode: lightness that reaches rS against text colour `pc`, minimal change. */
-		const defL = (L0, A, B, fr, fg, fb, pc) => {
-			if (cr(pc.yT, lum(fr, fg, fb)) >= rS) return L0;
+		const defL = (L0, A, B, fr, fg, fb, pc, rs) => {
+			if (cr(pc.yT, lum(fr, fg, fb)) >= rs) return L0;
 			C.oklabToLin(pc.pkL, A, B, lin);
-			if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) < rS) return pc.pkL; // unreachable: pin at the extreme
+			if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) < rs) return pc.pkL;
 			let lo = L0, hi = pc.pkL;
 			for (let n = 0; n < 9; n++) {
 				const mid = (lo + hi) / 2;
 				C.oklabToLin(mid, A, B, lin);
-				if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) >= rS) hi = mid; else lo = mid;
+				if (cr(pc.yT, lum(lin[0], lin[1], lin[2])) >= rs) hi = mid; else lo = mid;
 			}
 			return hi;
 		};
 
-		/** Tricontrast: lightness of the nearest band edge, or L0 if already inside. */
-		const triL = (L0, A, B, Y0) => {
-			if (Y0 >= band.lo && Y0 <= band.hi) return L0;
-			const up = Y0 < band.lo, target = up ? band.lo : band.hi;
+		const triL = (L0, A, B, Y0, bd) => {
+			if (Y0 >= bd.lo && Y0 <= bd.hi) return L0;
+			const up = Y0 < bd.lo, target = up ? bd.lo : bd.hi;
 			let lo = up ? L0 : 0, hi = up ? 1 : L0;
 			for (let n = 0; n < 13; n++) {
 				const mid = (lo + hi) / 2;
@@ -1910,29 +2697,53 @@
 			return (lo + hi) / 2;
 		};
 
+		const solve = (L0, A, B, fr, fg, fb, rs, bd, isTri, pcList, kk, wk) => {
+			if (isTri) return triL(L0, A, B, lum(fr, fg, fb), bd);
+			let Lt = defL(L0, A, B, fr, fg, fb, pcList[0], rs);
+			if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcList[kk + 1], rs) - Lt);
+			return Lt;
+		};
+
 		let minV = Infinity, under = 0, nI = 0, nV = 0;
 		for (let y = 0; y < h; y++) {
-			const ry = (y + 0.5) / s;
-			const mY = hasFeather ? Math.min(
-				fT > 0 ? clamp01(ry / fT) : 1,
-				fB > 0 ? clamp01((H - ry) / fB) : 1
-			) : 1;
+			const ry = (y + 0.5) / s, by = ry - oy;
+			const inY = by > -eps && by < H + eps;
+			const uY = (inY && hasFeather) ? Math.max(
+				fT > 0 ? (fT - by) / fT : 0,
+				fB > 0 ? (by - (H - fB)) / fB : 0,
+				0
+			) : 0;
 
 			for (let x = 0; x < w; x++) {
-				const q = (y * w + x) * 4, rx = (x + 0.5) / s;
-				const M = hasFeather ? smooth(Math.min(
-					mY,
-					fL > 0 ? clamp01(rx / fL) : 1,
-					fR > 0 ? clamp01((W - rx) / fR) : 1
-				)) : 1;
+				const q = (y * w + x) * 4, rx = (x + 0.5) / s, bx = rx - ox;
+				const inBox = inY && bx > -eps && bx < W + eps;
+				let Mb = 0;
+				if (inBox && boxCover) {
+					if (hasFeather) {
+						const uX = Math.max(
+							fL > 0 ? (fL - bx) / fL : 0,
+							fR > 0 ? (bx - (W - fR)) / fR : 0,
+							0
+						);
+						const r = (uX > 0 && uY > 0) ? Math.sqrt(uX * uX + uY * uY) : (uX > uY ? uX : uY);
+						Mb = smooth(clamp01(1 - r));
+					} else {
+						Mb = 1;
+					}
+				}
+				const Mh = haloOn ? maskAt(halo.mask, rx, ry) : 0;
+				const covers = inBox && boxCover;
+				if (!covers && Mh <= 0) continue;
+				const cov = covers ? 1 : Mh;
+				const mScreen = Mb + Mh - Mb * Mh;
 				const known = pix ? 1 - veilFrac(grid, rx, ry) : 0;
 
 				let wk = 0, kk = -1;
-				if (!tri) {
+				if (!triB || !triH) {
 					for (let k = 0; k < runs.length; k++) {
 						const r = runs[k];
 						const d = Math.hypot(Math.max(r.x0 - rx, 0, rx - r.x1), Math.max(r.y0 - ry, 0, ry - r.y1));
-						const wg = smooth(clamp01(1 - d / 6));
+						const wg = smooth(clamp01(1 - d / infl));
 						if (wg > wk) { wk = wg; kk = k; }
 					}
 				}
@@ -1940,49 +2751,62 @@
 				let ir = 0, ig = 0, ib = 0;
 				if (known > 0) {
 					let fr = LUT[pix[q]], fg = LUT[pix[q + 1]], fb = LUT[pix[q + 2]];
-					
-					if (blurPix) {
-						const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
-						fr = fr + M * (br - fr);
-						fg = fg + M * (bg - fg);
-						fb = fb + M * (bb - fb);
+
+					if (blurPix && maxBlur > 0) {
+						const mBlur = sameBlur ? mScreen : Math.max(Mb * boxBlurRatio, Mh * textBlurRatio);
+						if (mBlur > 0) {
+							const br = LUT[blurPix[q]], bg = LUT[blurPix[q + 1]], bb = LUT[blurPix[q + 2]];
+							fr = fr + mBlur * (br - fr);
+							fg = fg + mBlur * (bg - fg);
+							fb = fb + mBlur * (bb - fb);
+						}
 					}
-					
-					if (K.isBypass(ratio)) {
+
+					if (bypassB && bypassH) {
 						ir = toSrgb(fr); ig = toSrgb(fg); ib = toSrgb(fb);
 					} else {
 						C.linToOklab(fr, fg, fb, ok);
 						const L0 = ok[0], A = ok[1], B = ok[2];
-						let Lt;
-						if (tri) Lt = triL(L0, A, B, lum(fr, fg, fb));
-						else {
-							Lt = defL(L0, A, B, fr, fg, fb, pcs[0]);
-							if (kk >= 0) Lt += wk * (defL(L0, A, B, fr, fg, fb, pcs[kk + 1]) - Lt);
+						let L1 = L0;
+						if (!bypassB && mScreen > 0) {
+							const LtB = solve(L0, A, B, fr, fg, fb, rS, band, triB, pcs, kk, wk);
+							L1 = clamp01(L0 + mScreen * (LtB - L0));
 						}
-						C.oklabToLin(L0 + M * (Lt - L0), A, B, lin);
+						let L2 = L1;
+						if (!bypassH && Mh > 0) {
+							C.oklabToLin(L1, A, B, lin);
+							const LtH = solve(L1, A, B, lin[0], lin[1], lin[2], rSH, bandH, triH, pcsH, kk, wk);
+							const hk = covers ? Mh : 1;
+							L2 = clamp01(L1 + hk * (LtH - L1));
+						}
+						C.oklabToLin(L2, A, B, lin);
 						ir = toSrgb(lin[0]); ig = toSrgb(lin[1]); ib = toSrgb(lin[2]);
-						if (M >= 0.999 && known >= 0.999) {
+						if (Mb >= 0.999 && known >= 0.999 && !bypassB) {
 							const Y = lum(lin[0], lin[1], lin[2]);
-							const v = tri ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
+							const v = triB ? Math.min(cr(1, Y), cr(0, Y)) : cr(pcs[wk > 0.5 ? kk + 1 : 0].yT, Y);
 							if (v < minV) minV = v;
 							if (v < ratio - 1e-6) under++;
 							nI++;
 						}
 					}
-				} else if (M >= 0.999) nV++;
+				} else if (Mb >= 0.999) nV++;
 
-				const pv = tri ? tv : pcs[wk > 0.5 ? kk + 1 : 0];
-				const bypass = K.isBypass(ratio);
-				const wV = bypass ? 0 : (1 - known) * pv.al * M;
-				const aO = known + wV;
+				const vi = wk > 0.5 ? kk + 1 : 0;
+				let wB = 0, vB = 0, wH = 0, vH = 0;
+				if (!bypassB && mScreen > 0) { const pv = triB ? tv : pcs[vi]; wB = mScreen * pv.al; vB = pv.vc; }
+				if (!bypassH && Mh > 0) { const pv = triH ? tvH : pcsH[vi]; wH = Mh * pv.al; vH = pv.vc; }
+				const wm = wH > wB ? wH : wB, vcv = wH > wB ? vH : vB;
+				const wV = (1 - known) * wm;
+				const kc = known * cov;
+				const aO = kc + wV;
 				if (aO <= 0) continue;
-				out[q] = (known * ir + wV * pv.vc) / aO;
-				out[q + 1] = (known * ig + wV * pv.vc) / aO;
-				out[q + 2] = (known * ib + wV * pv.vc) / aO;
+				out[q] = (kc * ir + wV * vcv) / aO;
+				out[q + 1] = (kc * ig + wV * vcv) / aO;
+				out[q + 2] = (kc * ib + wV * vcv) / aO;
 				out[q + 3] = aO * 255;
 			}
 		}
-		const inf = tri ? !band.ok : pcs[0].pkR < ratio;
+		const inf = triB ? !band.ok : pcs[0].pkR < ratio;
 		return { source: new ImageData(out, w, h), stats: { min: nI ? minV : null, under, nI, nV, inf }, tainted };
 	}
 
@@ -1995,36 +2819,7 @@
  * ipax-backdrop / 3200-kernel-webgl.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, WebGL backend. Same contract as the CPU backend
- * (3000-kernel.js), computed by the fragment shader in 3210.
- *
- * ONE shared WebGL context: browsers cap contexts per page, so every managed
- * element renders in turn into the same hidden canvas, and the caller copies
- * the result into the element's own layer right away.
- *
- * What goes to the GPU: the backdrop estimate (texture), the unknown-cell grid
- * (texture) and a handful of uniforms. Nothing is read back, so there are no
- * contrast statistics on this backend (stats = null).
- *
- * PERFORMANCE (v0.1.05) - nothing is reallocated while sizes vary
- *   - The drawing buffer only GROWS (rounded up to 64 px). Each render draws into its
- *     lower-left w x h corner (gl.viewport) and returns result.srcRect, the
- *     rectangle of the canvas that holds the pixels (GL origin is bottom-left, so
- *     srcRect.y = canvasHeight - h). compositor.draw() copies only that rectangle.
- *     REQUIRES the v0.1.05 4000-compositor.js (srcRect support).
- *   - The estimate, blur and grid textures also only grow. Content is uploaded with
- *     texSubImage2D into the corner and the shader scales the UVs (uTexSize, uGridTex).
- *   - The unknown grid V (already 0/1 bytes) is uploaded directly: no per-render copy.
- *   - Samplers, vertex attribute, pixel-store state and the program are set once.
- *   - Uniform arrays are preallocated.
- *   - gl.getError() is a synchronous round trip to the GPU process, so it only runs on
- *     the first renders and then every 16th. Context loss is caught by its event.
- *
- * Availability checks (any failure marks the backend unavailable and the
- * dispatcher falls back to the CPU kernel): context creation (software
- * renderers are refused), highp floats in fragment shaders, shader
- * compilation and linking, any GL error after a draw, and context loss.
- * A lost context that is later restored makes the backend available again.
+ * CHAPTER 3 - KERNEL, WebGL backend. Paired with 3100-kernel-cpu.js and 3210-kernel-webgl-shaders.js.
  *
  * Service 'ipax-backdrop:kernel-webgl': available(), render(input),
  *   disable(reason), reason(), reset()
@@ -2034,20 +2829,30 @@
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
-	const UNIFORMS = ['uEst', 'uEstBlur', 'uHasBlur', 'uGrid', 'uSize', 'uTexSize', 'uGridTex', 'uDim', 'uScale', 'uFeather', 'uGridInfo', 'uHasEst', 'uTri', 'uRatioS', 'uBypass', 'uBand', 'uTriVeil', 'uRunCount', 'uRun', 'uYT', 'uPk', 'uAl', 'uVc'];
+	const UNIFORMS = [
+		'uEst', 'uEstBlur', 'uHasBlur', 'uBlurRatios',
+		'uGrid', 'uHalo', 'uSize', 'uTexSize', 'uGridTex',
+		'uHaloTex', 'uHaloInfo', 'uHaloOn', 'uHaloShared',
+		'uBox', 'uDim', 'uScale', 'uFeather', 'uGridInfo',
+		'uHasEst', 'uTri', 'uTriH', 'uRatioS', 'uRatioSH',
+		'uBypass', 'uBypassH', 'uBoxCover',
+		'uBand', 'uBandH', 'uTriVeil', 'uTriVeilH',
+		'uInfl', 'uRunCount', 'uRun', 'uCol', 'uColH'
+	];
 	const ALIGN = 64;
 	const up = (v, a) => Math.ceil(v / (a || ALIGN)) * (a || ALIGN);
 
 	function freshState() {
 		return {
-			canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, buf: null, aPos: -1,
+			canvas: null, gl: null, prog: null, loc: null, texEst: null, texGrid: null, texBlur: null, texHalo: null, buf: null, aPos: -1,
 			broken: false, why: '',
-			cw: 0, ch: 0,   // drawing buffer size
-			tw: 0, th: 0,   // estimate texture size (allocated)
-			bw: 0, bh: 0,   // blur texture size (allocated)
-			gw: 0, gh: 0,   // grid texture size (allocated)
+			cw: 0, ch: 0,
+			tw: 0, th: 0,
+			bw: 0, bh: 0,
+			gw: 0, gh: 0,
+			hw: 0, hh: 0,
 			maxDim: 0, n: 0,
-			yT: null, pk: null, al: null, vc: null, rect: null,
+			col: null, colH: null, rect: null,
 			srcRect: { x: 0, y: 0, w: 0, h: 0 }
 		};
 	}
@@ -2067,13 +2872,12 @@
 		return sh;
 	}
 
-	/** Creates a texture and binds it to the CURRENT texture unit. */
-	function makeTexture(gl) {
+	function makeTexture(gl, linear) {
 		const t = gl.createTexture();
 		gl.bindTexture(gl.TEXTURE_2D, t);
-		// NPOT-safe settings: clamp, no mipmaps, nearest.
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		const filter = linear ? gl.LINEAR : gl.NEAREST;
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		return t;
@@ -2100,11 +2904,11 @@
 			const loc = {};
 			UNIFORMS.forEach((n) => { loc[n] = gl.getUniformLocation(prog, n) || gl.getUniformLocation(prog, n + '[0]'); });
 
-			// One-time state: program, samplers, geometry, pixel storage.
 			gl.useProgram(prog);
 			gl.uniform1i(loc.uEst, 0);
 			gl.uniform1i(loc.uGrid, 1);
 			gl.uniform1i(loc.uEstBlur, 2);
+			gl.uniform1i(loc.uHalo, 3);
 			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 			gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
 			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -2119,18 +2923,17 @@
 			canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); fail('WebGL context lost'); }, false);
 			canvas.addEventListener('webglcontextrestored', () => { state.broken = false; state.why = ''; state.canvas = null; state.gl = null; }, false);
 
-			// Fresh size bookkeeping: the new context has no allocated storage.
-			state.cw = state.ch = state.tw = state.th = state.bw = state.bh = state.gw = state.gh = 0;
+			state.cw = state.ch = state.tw = state.th = state.bw = state.bh = state.gw = state.gh = state.hw = state.hh = 0;
 			const mvd = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
 			state.maxDim = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), mvd[0], mvd[1]);
-			state.yT = new Float32Array(maxC); state.pk = new Float32Array(maxC);
-			state.al = new Float32Array(maxC); state.vc = new Float32Array(maxC);
+			state.col = new Float32Array(maxC * 4); state.colH = new Float32Array(maxC * 4);
 			state.rect = new Float32Array(maxRuns * 4);
 
 			state.canvas = canvas; state.gl = gl; state.prog = prog; state.loc = loc; state.buf = buf; state.aPos = aPos;
 			gl.activeTexture(gl.TEXTURE0); state.texEst = makeTexture(gl);
 			gl.activeTexture(gl.TEXTURE1); state.texGrid = makeTexture(gl);
 			gl.activeTexture(gl.TEXTURE2); state.texBlur = makeTexture(gl);
+			gl.activeTexture(gl.TEXTURE3); state.texHalo = makeTexture(gl, true);
 			return true;
 		} catch (err) {
 			return fail(String(err && err.message || err));
@@ -2141,10 +2944,10 @@
 		if (!init()) throw new Error(state.why || 'WebGL unavailable');
 		const K = svc('contrast'), maxRuns = svc('limits').maxRuns;
 		const { est, estBlur, grid, w, h, s, W, H, params, colors } = input;
+		const halo = input.halo && input.halo.mask ? input.halo : null;
 		const gl = state.gl, L = state.loc, maxDim = state.maxDim;
 		if (w > maxDim || h > maxDim || grid.nx > maxDim || grid.ny > maxDim) throw new Error('working size ' + w + 'x' + h + ' exceeds the GPU limit ' + maxDim);
 
-		// 1. Drawing buffer: only grows. Changing canvas.width/height reallocates it, so it is avoided.
 		if (w > state.cw || h > state.ch) {
 			state.cw = Math.min(maxDim, Math.max(state.cw, up(w)));
 			state.ch = Math.min(maxDim, Math.max(state.ch, up(h)));
@@ -2152,16 +2955,14 @@
 		}
 		gl.viewport(0, 0, w, h);
 
-		// 2. Estimate texture: allocated once per growth, filled with texSubImage2D.
 		if (w > state.tw || h > state.th) {
 			state.tw = Math.min(maxDim, Math.max(state.tw, up(w)));
 			state.th = Math.min(maxDim, Math.max(state.th, up(h)));
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, state.texEst);
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, state.tw, state.th, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-			state.bw = 0; state.bh = 0; // the blur texture must match the new size
+			state.bw = 0; state.bh = 0;
 		}
-		// A tainted canvas throws SecurityError: veil only.
 		let hasEst = 0, tainted = false;
 		if (est) {
 			try {
@@ -2172,7 +2973,6 @@
 			} catch (e) { tainted = true; }
 		}
 
-		// 3. Blurred estimate -> texture unit 2 (same allocated size as the estimate).
 		let hasBlur = 0;
 		if (estBlur && !tainted) {
 			try {
@@ -2184,10 +2984,9 @@
 				}
 				gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, estBlur);
 				hasBlur = 1;
-			} catch (e) { } // silent fail, falls back to sharp
+			} catch (e) { }
 		}
 
-		// 4. Unknown cells -> texture unit 1. V is already 0/1 bytes; the shader multiplies by 255.
 		gl.activeTexture(gl.TEXTURE1);
 		gl.bindTexture(gl.TEXTURE_2D, state.texGrid);
 		if (grid.nx > state.gw || grid.ny > state.gh) {
@@ -2197,20 +2996,62 @@
 		}
 		gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, grid.nx, grid.ny, gl.LUMINANCE, gl.UNSIGNED_BYTE, grid.V);
 
-		// 5. Per-colour parameters come from the shared contrast utilities.
-		const rS = K.solveRatio(params.ratio), tri = params.mode === 'tricontrast';
+		let hmw = 1, hmh = 1, hcs = 1;
+		if (halo) {
+			const mk = halo.mask;
+			hmw = mk.mw; hmh = mk.mh; hcs = mk.cs;
+			if (hmw > maxDim || hmh > maxDim) throw new Error('halo mask ' + hmw + 'x' + hmh + ' exceeds the GPU limit ' + maxDim);
+			gl.activeTexture(gl.TEXTURE3);
+			gl.bindTexture(gl.TEXTURE_2D, state.texHalo);
+			if (hmw > state.hw || hmh > state.hh) {
+				state.hw = Math.min(maxDim, Math.max(state.hw, up(hmw, 16)));
+				state.hh = Math.min(maxDim, Math.max(state.hh, up(hmh, 16)));
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, state.hw, state.hh, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, null);
+			}
+			gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, hmw, hmh, gl.LUMINANCE, gl.UNSIGNED_BYTE, mk.data);
+		}
+
+		const rS = K.solveRatio(params.ratio), triB = params.mode === 'tricontrast';
+		const rH = halo ? halo.ratio : params.ratio, rSH = K.solveRatio(rH);
+		const triH = halo ? ((halo.mode || params.mode) === 'tricontrast') : triB;
+		const shared = !!(halo && halo.shared);
+		const bypassB = K.isBypass(params.ratio);
+		const bypassH = !halo || K.isBypass(rH);
+
+		const boxBlur = input.boxBlur !== undefined ? input.boxBlur : (params.blur || 0);
+		const textBlur = input.textBlur !== undefined ? input.textBlur : (halo ? (halo.blur || 0) : 0);
+		const maxBlur = input.maxBlur !== undefined ? input.maxBlur : Math.max(boxBlur, textBlur);
+		const boxBlurRatio = maxBlur > 0 ? boxBlur / maxBlur : 0;
+		const textBlurRatio = maxBlur > 0 ? textBlur / maxBlur : 0;
+
 		const runs = colors.runs.length > maxRuns ? colors.runs.slice(0, maxRuns) : colors.runs;
 		const pcs = [K.prepareColor(colors.base, rS)];
 		for (let i = 0; i < runs.length; i++) pcs.push(K.prepareColor(runs[i].c, rS));
-		const yT = state.yT, pk = state.pk, al = state.al, vc = state.vc, rect = state.rect;
-		for (let i = 0; i < pcs.length; i++) { const p = pcs[i]; yT[i] = p.yT; pk[i] = p.pkL; al[i] = p.al; vc[i] = p.vc / 255; }
+		let pcsH = pcs;
+		if (halo && !shared) {
+			pcsH = [K.prepareColor(colors.base, rSH)];
+			for (let i = 0; i < runs.length; i++) pcsH.push(K.prepareColor(runs[i].c, rSH));
+		}
+		const col = state.col, colH = state.colH, rect = state.rect;
+		for (let i = 0; i < pcs.length; i++) {
+			const p = pcs[i], q = pcsH[i];
+			col[i * 4] = p.yT; col[i * 4 + 1] = p.pkL; col[i * 4 + 2] = p.al; col[i * 4 + 3] = p.vc / 255;
+			colH[i * 4] = q.yT; colH[i * 4 + 1] = q.pkL; colH[i * 4 + 2] = q.al; colH[i * 4 + 3] = q.vc / 255;
+		}
 		for (let i = 0; i < runs.length; i++) { const r = runs[i]; rect[i * 4] = r.x0; rect[i * 4 + 1] = r.y0; rect[i * 4 + 2] = r.x1; rect[i * 4 + 3] = r.y1; }
 		const band = K.band(params.ratio), tv = K.bandVeil(band);
+		const bandH = halo ? K.band(rH) : band, tvH = halo ? K.bandVeil(bandH) : tv;
 
 		gl.uniform1f(L.uHasBlur, hasBlur);
+		gl.uniform2f(L.uBlurRatios, boxBlurRatio, textBlurRatio);
 		gl.uniform2f(L.uSize, w, h);
 		gl.uniform2f(L.uTexSize, state.tw, state.th);
 		gl.uniform2f(L.uGridTex, state.gw, state.gh);
+		gl.uniform2f(L.uHaloTex, state.hw || 1, state.hh || 1);
+		gl.uniform3f(L.uHaloInfo, hmw, hmh, hcs);
+		gl.uniform1f(L.uHaloOn, halo ? 1 : 0);
+		gl.uniform1f(L.uHaloShared, shared ? 1 : 0);
+		gl.uniform2f(L.uBox, input.ox || 0, input.oy || 0);
 		gl.uniform2f(L.uDim, W, H);
 		gl.uniform1f(L.uScale, s);
 		const fParam = params.feather;
@@ -2220,27 +3061,30 @@
 		gl.uniform4f(L.uFeather, f.top || 0, f.right || 0, f.bottom || 0, f.left || 0);
 		gl.uniform3f(L.uGridInfo, grid.nx, grid.ny, grid.g);
 		gl.uniform1f(L.uHasEst, hasEst);
-		gl.uniform1f(L.uTri, tri ? 1 : 0);
+		gl.uniform1f(L.uTri, triB ? 1 : 0);
+		gl.uniform1f(L.uTriH, triH ? 1 : 0);
 		gl.uniform1f(L.uRatioS, rS);
-		gl.uniform1f(L.uBypass, K.isBypass(params.ratio) ? 1 : 0);
+		gl.uniform1f(L.uRatioSH, rSH);
+		gl.uniform1f(L.uBypass, bypassB ? 1 : 0);
+		gl.uniform1f(L.uBypassH, bypassH ? 1 : 0);
+		gl.uniform1f(L.uBoxCover, input.boxCover === false ? 0 : 1);
 		gl.uniform2f(L.uBand, band.lo, band.hi);
+		gl.uniform2f(L.uBandH, bandH.lo, bandH.hi);
 		gl.uniform2f(L.uTriVeil, tv.al, tv.vc / 255);
+		gl.uniform2f(L.uTriVeilH, tvH.al, tvH.vc / 255);
+		gl.uniform1f(L.uInfl, input.infl > 6 ? input.infl : 6);
 		gl.uniform1i(L.uRunCount, runs.length);
 		gl.uniform4fv(L.uRun, rect);
-		gl.uniform1fv(L.uYT, yT);
-		gl.uniform1fv(L.uPk, pk);
-		gl.uniform1fv(L.uAl, al);
-		gl.uniform1fv(L.uVc, vc);
+		gl.uniform4fv(L.uCol, col);
+		gl.uniform4fv(L.uColH, colH);
 
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-		// getError is synchronous: first renders, then every 16th.
 		if (state.n++ < 4 || (state.n & 15) === 0) {
 			const err = gl.getError();
 			if (err !== gl.NO_ERROR) throw new Error('WebGL error 0x' + err.toString(16));
 		}
 
-		// The result sits in the lower-left w x h corner of the buffer. In bitmap coordinates (origin top-left) that is y = ch - h.
 		const sr = state.srcRect;
 		sr.x = 0; sr.y = state.ch - h; sr.w = w; sr.h = h;
 		return { source: state.canvas, srcRect: sr, stats: null, tainted };
@@ -2261,33 +3105,14 @@
  * ipax-backdrop / 3210-kernel-webgl-shaders.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 3 - KERNEL, WebGL backend: shader sources. No logic, only text.
- *
- * GLSL ES 1.00 (WebGL 1) on purpose: the kernel needs no WebGL 2 feature and
- * WebGL 1 is available everywhere. The fragment shader is a line-by-line port
- * of 3100-kernel-cpu.js; keep both in sync. Loops have constant bounds, and
- * uniform arrays are only indexed by loop counters, as GLSL ES 1.00 requires.
- *
- * Per-colour parameters (luminance, direction, veil alpha and level) are
- * computed on the CPU by 0110-util-contrast.js and passed as uniforms, so the
- * contrast maths has a single source of truth.
- *
- * v0.1.05: textures may be larger than the working size (uTexSize, uGridTex), so the
- * backend can reuse them with texSubImage2D. The unknown grid is uploaded as raw 0/1 bytes.
- * Bypass uses the same test as the CPU kernel (uBypass) instead of a 1.05 threshold.
+ * CHAPTER 3 - KERNEL, WebGL backend: shader sources (GLSL ES 1.00).
+ * Line-by-line port of 3100-kernel-cpu.js.
  *
  * Service 'ipax-backdrop:webgl-shaders': {vertex, fragment(maxRuns)}
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
-
-
-
-
-
-
-
 
 	const vertex = [
 		'attribute vec2 aPos;',
@@ -2298,7 +3123,7 @@
 const FRAGMENT = `precision highp float;
 #define MAXRUNS __MAXRUNS__
 #define MAXC __MAXC__
-uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; uniform sampler2D uGrid; uniform vec2 uSize; uniform vec2 uTexSize; uniform vec2 uGridTex; uniform vec2 uDim; uniform float uScale; uniform vec4 uFeather; uniform vec3 uGridInfo; uniform float uHasEst; uniform float uTri; uniform float uRatioS; uniform float uBypass; uniform vec2 uBand; uniform vec2 uTriVeil; uniform int uRunCount; uniform vec4 uRun[MAXRUNS]; uniform float uYT[MAXC]; uniform float uPk[MAXC]; uniform float uAl[MAXC]; uniform float uVc[MAXC]; float sm(float m) { return m * m * (3.0 - 2.0 * m); } float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); } float toSrgb(float l) { l = clamp(l, 0.0, 1.0); return l <= 0.0031308 ? 12.92 * l : 1.055 * pow(l, 1.0 / 2.4) - 0.055; } float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); } float cr(float a, float b) { return (max(a, b) + 0.05) / (min(a, b) + 0.05); } float cbrt(float x) { return x <= 0.0 ? 0.0 : pow(x, 1.0 / 3.0); } vec3 linToOk(vec3 c) { float l = cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b); float m = cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b); float s = cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b); return vec3( 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s); } vec3 okToLin(float L, float a, float b) { float l = L + 0.3963377774 * a + 0.2158037573 * b; l = l * l * l; float m = L - 0.1055613458 * a - 0.0638541728 * b; m = m * m * m; float s = L - 0.0894841775 * a - 1.2914855480 * b; s = s * s * s; return clamp(vec3( 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 0.0, 1.0); } void colorOf(int idx, out float yT, out float pk, out float al, out float vc) { yT = uYT[0]; pk = uPk[0]; al = uAl[0]; vc = uVc[0]; for (int k = 1; k < MAXC; k++) { if (k == idx) { yT = uYT[k]; pk = uPk[k]; al = uAl[k]; vc = uVc[k]; } } } float gridAt(float i, float j) { float nx = uGridInfo.x; float ny = uGridInfo.y; float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0); return min(texture2D(uGrid, vec2((ci + 0.5) / uGridTex.x, (cj + 0.5) / uGridTex.y)).r * 255.0, 1.0); } float veilFrac(float rx, float ry) { float g = uGridInfo.z; float fx = rx / g - 0.5; float fy = ry / g - 0.5; float ci = floor(fx); float cj = floor(fy); float tx = fx - ci; float ty = fy - cj; return (gridAt(ci, cj) * (1.0 - tx) + gridAt(ci + 1.0, cj) * tx) * (1.0 - ty) + (gridAt(ci, cj + 1.0) * (1.0 - tx) + gridAt(ci + 1.0, cj + 1.0) * tx) * ty; } float defL(float L0, float A, float B, vec3 lin0, float yT, float pk) { if (cr(yT, lum(lin0)) >= uRatioS) return L0; if (cr(yT, lum(okToLin(pk, A, B))) < uRatioS) return pk; float lo = L0; float hi = pk; for (int n = 0; n < 9; n++) { float mid = (lo + hi) * 0.5; if (cr(yT, lum(okToLin(mid, A, B))) >= uRatioS) hi = mid; else lo = mid; } return hi; } float triL(float L0, float A, float B, float Y0) { if (Y0 >= uBand.x && Y0 <= uBand.y) return L0; bool up = Y0 < uBand.x; float target = up ? uBand.x : uBand.y; float lo = up ? L0 : 0.0; float hi = up ? 1.0 : L0; for (int n = 0; n < 13; n++) { float mid = (lo + hi) * 0.5; if (lum(okToLin(mid, A, B)) < target) lo = mid; else hi = mid; } return (lo + hi) * 0.5; } void main() { vec2 px = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y); float rx = px.x / uScale; float ry = px.y / uScale; float M = 1.0; float mT = uFeather.x > 0.0 ? clamp(ry / uFeather.x, 0.0, 1.0) : 1.0; float mR = uFeather.y > 0.0 ? clamp((uDim.x - rx) / uFeather.y, 0.0, 1.0) : 1.0; float mB = uFeather.z > 0.0 ? clamp((uDim.y - ry) / uFeather.z, 0.0, 1.0) : 1.0; float mL = uFeather.w > 0.0 ? clamp(rx / uFeather.w, 0.0, 1.0) : 1.0; M = sm(min(min(mT, mR), min(mB, mL))); float known = 0.0; if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry); float wk = 0.0; int kk = -1; if (uTri < 0.5) { for (int k = 0; k < MAXRUNS; k++) { if (k >= uRunCount) break; vec4 r = uRun[k]; float dx = max(max(r.x - rx, 0.0), rx - r.z); float dy = max(max(r.y - ry, 0.0), ry - r.w); float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / 6.0, 0.0, 1.0)); if (wg > wk) { wk = wg; kk = k; } } } vec3 img = vec3(0.0); if (known > 0.0) { vec2 uv = px / uTexSize; vec4 e = texture2D(uEst, uv); vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b)); if (uHasBlur > 0.5) { vec4 eb = texture2D(uEstBlur, uv); vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b)); lin0 = lin0 + M * (blin - lin0); } if (uBypass > 0.5) { img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b)); } else { vec3 ok = linToOk(lin0); float Lt; if (uTri > 0.5) Lt = triL(ok.x, ok.y, ok.z, lum(lin0)); else { float yT; float pk; float al; float vc; colorOf(0, yT, pk, al, vc); Lt = defL(ok.x, ok.y, ok.z, lin0, yT, pk); if (kk >= 0) { colorOf(kk + 1, yT, pk, al, vc); Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, yT, pk) - Lt); } } vec3 o = okToLin(ok.x + M * (Lt - ok.x), ok.y, ok.z); img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b)); } } float pAl; float pVc; if (uTri > 0.5) { pAl = uTriVeil.x; pVc = uTriVeil.y; } else { float yT2; float pk2; colorOf(wk > 0.5 ? kk + 1 : 0, yT2, pk2, pAl, pVc); } float wV = uBypass > 0.5 ? 0.0 : (1.0 - known) * pAl * M; float aO = known + wV; if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; } vec3 col = (known * img + wV * vec3(pVc)) / aO; gl_FragColor = vec4(col * aO, aO); }`;
+uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; uniform vec2 uBlurRatios; uniform sampler2D uGrid; uniform sampler2D uHalo; uniform vec2 uSize; uniform vec2 uTexSize; uniform vec2 uGridTex; uniform vec2 uHaloTex; uniform vec3 uHaloInfo; uniform float uHaloOn; uniform float uHaloShared; uniform vec2 uBox; uniform vec2 uDim; uniform float uScale; uniform vec4 uFeather; uniform vec3 uGridInfo; uniform float uHasEst; uniform float uTri; uniform float uTriH; uniform float uRatioS; uniform float uRatioSH; uniform float uBypass; uniform float uBypassH; uniform float uBoxCover; uniform vec2 uBand; uniform vec2 uBandH; uniform vec2 uTriVeil; uniform vec2 uTriVeilH; uniform float uInfl; uniform int uRunCount; uniform vec4 uRun[MAXRUNS]; uniform vec4 uCol[MAXC]; uniform vec4 uColH[MAXC]; float sm(float m) { return m * m * (3.0 - 2.0 * m); } float toLin(float c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); } float toSrgb(float l) { l = clamp(l, 0.0, 1.0); return l <= 0.0031308 ? 12.92 * l : 1.055 * pow(l, 1.0 / 2.4) - 0.055; } float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); } float cr(float a, float b) { return (max(a, b) + 0.05) / (min(a, b) + 0.05); } float cbrt(float x) { return x <= 0.0 ? 0.0 : pow(x, 1.0 / 3.0); } vec3 linToOk(vec3 c) { float l = cbrt(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b); float m = cbrt(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b); float s = cbrt(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b); return vec3( 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s); } vec3 okToLin(float L, float a, float b) { float l = L + 0.3963377774 * a + 0.2158037573 * b; l = l * l * l; float m = L - 0.1055613458 * a - 0.0638541728 * b; m = m * m * m; float s = L - 0.0894841775 * a - 1.2914855480 * b; s = s * s * s; return clamp(vec3( 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s), 0.0, 1.0); } vec4 colOf(int idx) { vec4 c = uCol[0]; for (int k = 1; k < MAXC; k++) { if (k == idx) c = uCol[k]; } return c; } vec4 colHOf(int idx) { vec4 c = uColH[0]; for (int k = 1; k < MAXC; k++) { if (k == idx) c = uColH[k]; } return c; } float gridAt(float i, float j) { float nx = uGridInfo.x; float ny = uGridInfo.y; float ci = clamp(i, 0.0, nx - 1.0); float cj = clamp(j, 0.0, ny - 1.0); return min(texture2D(uGrid, vec2((ci + 0.5) / uGridTex.x, (cj + 0.5) / uGridTex.y)).r * 255.0, 1.0); } float veilFrac(float rx, float ry) { float g = uGridInfo.z; float fx = rx / g - 0.5; float fy = ry / g - 0.5; float ci = floor(fx); float cj = floor(fy); float tx = fx - ci; float ty = fy - cj; return (gridAt(ci, cj) * (1.0 - tx) + gridAt(ci + 1.0, cj) * tx) * (1.0 - ty) + (gridAt(ci, cj + 1.0) * (1.0 - tx) + gridAt(ci + 1.0, cj + 1.0) * tx) * ty; } float haloAt(float rx, float ry) { vec2 t = clamp(vec2(rx, ry) / uHaloInfo.z, vec2(0.5), uHaloInfo.xy - vec2(0.5)); return texture2D(uHalo, t / uHaloTex).r; } float defL(float L0, float A, float B, vec3 lin0, float yT, float pk, float rs) { if (cr(yT, lum(lin0)) >= rs) return L0; if (cr(yT, lum(okToLin(pk, A, B))) < rs) return pk; float lo = L0; float hi = pk; for (int n = 0; n < 9; n++) { float mid = (lo + hi) * 0.5; if (cr(yT, lum(okToLin(mid, A, B))) >= rs) hi = mid; else lo = mid; } return hi; } float triL(float L0, float A, float B, float Y0, vec2 bd) { if (Y0 >= bd.x && Y0 <= bd.y) return L0; bool up = Y0 < bd.x; float target = up ? bd.x : bd.y; float lo = up ? L0 : 0.0; float hi = up ? 1.0 : L0; for (int n = 0; n < 13; n++) { float mid = (lo + hi) * 0.5; if (lum(okToLin(mid, A, B)) < target) lo = mid; else hi = mid; } return (lo + hi) * 0.5; } float solveBoxL(vec3 ok, vec3 lin0, int kk, float wk, float rs, vec2 bd, float isTri) { if (isTri > 0.5) return triL(ok.x, ok.y, ok.z, lum(lin0), bd); vec4 c = colOf(0); float Lt = defL(ok.x, ok.y, ok.z, lin0, c.x, c.y, rs); if (kk >= 0) { vec4 c2 = colOf(kk + 1); Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, c2.x, c2.y, rs) - Lt); } return Lt; } float solveTextL(vec3 ok, vec3 lin0, int kk, float wk, float rs, vec2 bd, float isTri) { if (isTri > 0.5) return triL(ok.x, ok.y, ok.z, lum(lin0), bd); vec4 c = colHOf(0); float Lt = defL(ok.x, ok.y, ok.z, lin0, c.x, c.y, rs); if (kk >= 0) { vec4 c2 = colHOf(kk + 1); Lt = Lt + wk * (defL(ok.x, ok.y, ok.z, lin0, c2.x, c2.y, rs) - Lt); } return Lt; } void main() { vec2 px = vec2(gl_FragCoord.x, uSize.y - gl_FragCoord.y); float rx = px.x / uScale; float ry = px.y / uScale; float bx = rx - uBox.x; float by = ry - uBox.y; float eps = 1.0 / uScale; bool inBox = bx > -eps && bx < uDim.x + eps && by > -eps && by < uDim.y + eps; bool covers = inBox && uBoxCover > 0.5; float Mb = 0.0; if (covers) { float uT = uFeather.x > 0.0 ? (uFeather.x - by) / uFeather.x : 0.0; float uR = uFeather.y > 0.0 ? (bx - (uDim.x - uFeather.y)) / uFeather.y : 0.0; float uB = uFeather.z > 0.0 ? (by - (uDim.y - uFeather.z)) / uFeather.z : 0.0; float uL = uFeather.w > 0.0 ? (uFeather.w - bx) / uFeather.w : 0.0; float ux = max(max(uL, uR), 0.0); float uy = max(max(uT, uB), 0.0); float r = (ux > 0.0 && uy > 0.0) ? sqrt(ux * ux + uy * uy) : max(ux, uy); Mb = sm(clamp(1.0 - r, 0.0, 1.0)); } float Mh = 0.0; if (uHaloOn > 0.5) Mh = haloAt(rx, ry); if (!covers && Mh <= 0.0) { gl_FragColor = vec4(0.0); return; } float cov = covers ? 1.0 : Mh; float mScreen = Mb + Mh - Mb * Mh; float known = 0.0; if (uHasEst > 0.5) known = 1.0 - veilFrac(rx, ry); float wk = 0.0; int kk = -1; if (uTri < 0.5 || uTriH < 0.5) { for (int k = 0; k < MAXRUNS; k++) { if (k >= uRunCount) break; vec4 r = uRun[k]; float dx = max(max(r.x - rx, 0.0), rx - r.z); float dy = max(max(r.y - ry, 0.0), ry - r.w); float wg = sm(clamp(1.0 - sqrt(dx * dx + dy * dy) / uInfl, 0.0, 1.0)); if (wg > wk) { wk = wg; kk = k; } } } vec3 img = vec3(0.0); if (known > 0.0) { vec2 uv = px / uTexSize; vec4 e = texture2D(uEst, uv); vec3 lin0 = vec3(toLin(e.r), toLin(e.g), toLin(e.b)); if (uHasBlur > 0.5) { float mBlur = abs(uBlurRatios.x - uBlurRatios.y) < 0.0001 ? mScreen : max(Mb * uBlurRatios.x, Mh * uBlurRatios.y); if (mBlur > 0.0) { vec4 eb = texture2D(uEstBlur, uv); vec3 blin = vec3(toLin(eb.r), toLin(eb.g), toLin(eb.b)); lin0 = lin0 + mBlur * (blin - lin0); } } if (uBypass > 0.5 && uBypassH > 0.5) { img = vec3(toSrgb(lin0.r), toSrgb(lin0.g), toSrgb(lin0.b)); } else { vec3 ok = linToOk(lin0); float L1 = ok.x; if (uBypass < 0.5 && mScreen > 0.0) { float LtB = solveBoxL(ok, lin0, kk, wk, uRatioS, uBand, uTri); L1 = clamp(ok.x + mScreen * (LtB - ok.x), 0.0, 1.0); } float L2 = L1; if (uBypassH < 0.5 && Mh > 0.0) { vec3 lin1 = okToLin(L1, ok.y, ok.z); float LtH = solveTextL(vec3(L1, ok.y, ok.z), lin1, kk, wk, uRatioSH, uBandH, uTriH); float hk = covers ? Mh : 1.0; L2 = clamp(L1 + hk * (LtH - L1), 0.0, 1.0); } vec3 o = okToLin(L2, ok.y, ok.z); img = vec3(toSrgb(o.r), toSrgb(o.g), toSrgb(o.b)); } } int vi = wk > 0.5 ? kk + 1 : 0; float wB = 0.0; float vB = 0.0; if (uBypass < 0.5 && mScreen > 0.0) { if (uTri > 0.5) { wB = mScreen * uTriVeil.x; vB = uTriVeil.y; } else { vec4 cb = colOf(vi); wB = mScreen * cb.z; vB = cb.w; } } float wH = 0.0; float vH = 0.0; if (uBypassH < 0.5 && Mh > 0.0) { if (uTriH > 0.5) { wH = Mh * uTriVeilH.x; vH = uTriVeilH.y; } else { vec4 ch = colHOf(vi); wH = Mh * ch.z; vH = ch.w; } } float wm = wH > wB ? wH : wB; float vcv = wH > wB ? vH : vB; float wV = (1.0 - known) * wm; float kc = known * cov; float aO = kc + wV; if (aO <= 0.0) { gl_FragColor = vec4(0.0); return; } vec3 col = (kc * img + wV * vec3(vcv)) / aO; gl_FragColor = vec4(col * aO, aO); }`;
 /* glsl-minifier-end */
 
 	function fragment(maxRuns) {
@@ -2316,75 +3141,93 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
  *
  * CHAPTER 4 - COMPOSITOR: where the result lives in the page.
  *
- * Every managed element gets ONE sibling layer, inserted immediately BEFORE it:
+ * Automatic two-level layer stacking (zero CSS plane configuration required):
  *
- *     <ipax-backdrop-layer aria-hidden="true"><canvas></canvas></ipax-backdrop-layer>
- *     <h1 style="...">The managed element</h1>
+ *   Level 1 (Direct siblings / shared stacking context):
+ *     <ipax-backdrop-layer aria-hidden="true" style="z-index: 0">...</ipax-backdrop-layer>
+ *     <h1 style="...">The managed element (z-index: 1 via :where(), specificity 0)</h1>
+ *     Every managed element stays above every sibling backdrop layer while preserving
+ *     author z-index overrides, own background, gradients, ::before/::after and text-shadow.
  *
- * Why a sibling and not a child: the element keeps its own background,
- * gradient, ::before / ::after, text-shadow and, above all, its own
- * `backdrop-filter`, which then blurs OUR layer together with the real
- * backdrop. A child would be painted on top of the element's own background
- * and would not be blurred by its backdrop-filter.
+ *   Level 2 (Managed elements enclosed in stacking-context wrappers, e.g. .ed-box[z-index]):
+ *     When a common container holds 2 or more managed elements inside stacking-context wrappers,
+ *     all <ipax-backdrop-layer> nodes are projected into an isolated <ipax-backdrop-plane>
+ *     inserted in the common container immediately before the first wrapper (above background
+ *     elements such as .ed-stage-bg and below all wrappers), ordered internally by each
+ *     wrapper's effective z-index and mirroring wrapper opacity / visibility / display.
  *
- * Why the element must be positioned: a positioned element is painted above a
- * non-positioned one regardless of DOM order, so a static element's text would
- * end up UNDER our absolute layer. The internal stylesheet below gives managed
- * elements `position: relative` through `:where()` (specificity 0): any
- * `position` the author declares wins.
+ * The CSS blur fallback (backdrop-filter, used where the backdrop is unknown) lives on
+ * <div data-ipax-backdrop-bf>, which always covers the BOX only, so a halo that goes
+ * outside the box never blurs the real page. <canvas> is positioned above it so the
+ * kernel's feather-masked blur governs known pixels.
  *
- * Geometry: the layer copies offsetLeft / offsetTop / offsetWidth / offsetHeight
- * of the element. They share the same containing block because they are
- * siblings. Moving the parent moves both; size changes are watched with a
- * ResizeObserver (which emits 'ipax-backdrop:invalidate').
- *
- * PERFORMANCE NOTES (v0.1.05)
+ * PERFORMANCE NOTES (v0.1.05+)
  *   - Placement is split in two phases so a caller that handles many records
  *     can READ all geometry first and WRITE it afterwards (no layout thrashing):
  *       const m = records.map(measure);  records.forEach((r, i) => apply(r, m[i]));
- *     apply() skips the style writes when nothing changed (rec.placed cache).
+ *     apply() skips style writes when nothing changed (rec.placed cache).
  *   - draw() accepts result.srcRect {x, y, w, h}: a sub-rectangle of a source
  *     canvas that is larger than the target (shared WebGL canvas kept at its
- *     maximum size). Without srcRect the whole source is used (old behaviour).
+ *     maximum size). Without srcRect the whole source is used.
  *   - release() / sweep() free the canvas memory of layers that have been out
- *     of view for a while. A released record is flagged unsettled so it is
- *     recomputed when it comes back.
+ *     of view for a while.
  *
  * Service 'ipax-backdrop:compositor':
- *   ensureStyle()                 inject the internal stylesheet (idempotent)
- *   attach(el) -> rec             create the layer {el, layer, cv, id, ready}
- *   detachAll()                   remove every layer and observer
+ *   ensureStyle()                    inject the internal stylesheet (idempotent)
+ *   attach(el) -> rec                create the layer {el, layer, cv, bf, id, ready, ext, ...}
+ *   detach(el)                       remove one layer and clean up its stage plane if needed
+ *   detachAll()                      remove every layer, plane and observer
+ *   pruneDisconnected() -> rec[]     detach records whose elements were removed from DOM
+ *   refreshOrder()                   recompute DOM paint order across all active records
  *   recordFor(el) -> rec | undefined
- *   measure(rec) -> {l, t, w, h}  READ phase: element geometry (touches layout)
- *   apply(rec, m)                 WRITE phase: copy geometry to the layer (cached)
- *   place(rec)                    measure + apply (kept for compatibility)
- *   draw(rec, w, h, result, blurPx)  paint a kernel result into the layer canvas
- *   clear(rec)                    empty the layer
- *   release(rec)                  free canvas memory (backing store, scratch canvases)
- *   sweep(visibleSet, ttlMs)      release records hidden for longer than ttlMs
- *   withHitTesting(rec, fn)       run fn() with the layer reachable by
- *                                 elementsFromPoint (it is pointer-events:none otherwise)
+ *   ownerRecord(el) -> rec | undefined
+ *   isWrapper(el) -> boolean
+ *   isStageOrAncestor(el) -> boolean
+ *   recordsForTarget(el) -> rec[]
+ *   layersBelow(rec, R) -> descriptor[]
+ *   isAbove(a, b) -> boolean
+ *   measure(rec) -> geometry         READ phase
+ *   apply(rec, m)                    WRITE phase
+ *   setExt(rec, ext) -> boolean
+ *   place(rec)
+ *   draw(rec, w, h, result, blurPx)
+ *   clear(rec)
+ *   release(rec)
+ *   sweep(visibleSet, ttlMs)
+ *   withHitTesting(rec, fn)
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
+	const PLANE_TAG = 'ipax-backdrop-plane';
 	const records = new Map();
+	const wrapperToRec = new Map();
+	const stages = new Map(); // stageEl -> { el, plane, recs: Set<rec>, minZ }
 	let nextId = 0, observer = null, styleEl = null;
+
+	function planeTagName() {
+		return svc('names').planeTag || PLANE_TAG;
+	}
 
 	/**
 	 * INTERNAL STYLESHEET (the only CSS this library injects).
-	 *   rule 1  managed elements are positioned (specificity 0, author wins)
-	 *   rule 2  the layer is an absolutely positioned, click-through box
-	 *   rule 3  its canvas fills it
+	 *   rule 1  managed elements are positioned at z-index 1 (specificity 0, author wins)
+	 *   rule 2  the layer is an absolutely positioned, click-through box at z-index 0
+	 *   rule 3  the blur element is an absolutely positioned box (covers the element box)
+	 *   rule 4  the canvas sits above the blur fallback element and fills the layer
+	 *   rule 5  the shared stage plane isolates layer z-indices below all wrappers
 	 */
 	function cssText() {
 		const N = svc('names');
+		const pTag = planeTagName();
 		return [
-			':where([' + N.managedAttr + ']){position:relative}',
-			N.layerTag + '{position:absolute;display:block;pointer-events:none;margin:0;padding:0}',
-			N.layerTag + '>canvas{display:block;width:100%;height:100%}'
+			':where([' + N.managedAttr + ']){position:relative;z-index:1}',
+			N.layerTag + '{position:absolute;display:block;pointer-events:none;margin:0;padding:0;z-index:0}',
+			N.layerTag + '>[data-ipax-backdrop-bf]{position:absolute;display:block;pointer-events:none;margin:0;padding:0;border-radius:inherit}',
+			N.layerTag + '>canvas{position:relative;display:block;width:100%;height:100%}',
+			pTag + '{position:absolute;inset:0;display:block;pointer-events:none;margin:0;padding:0;isolation:isolate}'
 		].join('\n');
 	}
 
@@ -2396,24 +3239,113 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		document.head.appendChild(styleEl);
 	}
 
+	function createsStackingContext(el) {
+		if (!el || el.nodeType !== 1) return false;
+		const cs = getComputedStyle(el);
+		if (cs.position !== 'static' && cs.zIndex !== 'auto') return true;
+		if (cs.isolation === 'isolate') return true;
+		if (parseFloat(cs.opacity) < 1) return true;
+		if (cs.transform !== 'none') return true;
+		return false;
+	}
+
+	/**
+	 * Finds the outermost stacking-context wrapper around `el` that contains no other
+	 * managed elements. Returns null if `el` participates directly in a shared context.
+	 */
+	function findWrapper(el) {
+		const N = svc('names');
+		const managedSel = '[' + N.managedAttr + ']';
+		let wrapper = null;
+		let curr = el.parentElement;
+		while (curr && curr !== document.body && curr !== document.documentElement) {
+			const allManaged = curr.querySelectorAll(managedSel);
+			if (allManaged.length > 1) break;
+			if (createsStackingContext(curr)) wrapper = curr;
+			curr = curr.parentElement;
+		}
+		return wrapper;
+	}
+
+	function insertLayerSibling(rec) {
+		if (rec.layer.parentNode !== rec.el.parentNode || rec.layer.nextSibling !== rec.el) {
+			rec.el.parentNode.insertBefore(rec.layer, rec.el);
+		}
+		rec.layer.style.zIndex = '';
+		rec.layer.style.opacity = '';
+		rec.layer.style.visibility = '';
+		rec.layer.style.display = '';
+		rec.plane = null;
+		rec.placed = null;
+	}
+
+	function syncStagePlane(stageEl) {
+		const info = stages.get(stageEl);
+		if (!info) return;
+
+		if (info.recs.size >= 2 && stageEl.isConnected) {
+			if (!info.plane) {
+				info.plane = document.createElement(planeTagName());
+				info.plane.setAttribute('aria-hidden', 'true');
+			}
+			// Insert immediately before the first wrapper in DOM order so background elements
+			// prior to the boxes (e.g. .ed-stage-bg) stay underneath the layer plane.
+			let firstWrapper = null;
+			for (let child = stageEl.firstElementChild; child; child = child.nextElementSibling) {
+				if (wrapperToRec.has(child) && info.recs.has(wrapperToRec.get(child))) {
+					firstWrapper = child;
+					break;
+				}
+			}
+			if (firstWrapper) {
+				if (info.plane.parentNode !== stageEl || info.plane.nextSibling !== firstWrapper) {
+					stageEl.insertBefore(info.plane, firstWrapper);
+				}
+			} else if (info.plane.parentNode !== stageEl) {
+				stageEl.appendChild(info.plane);
+			}
+
+			info.recs.forEach((r) => {
+				if (r.layer.parentNode !== info.plane) {
+					info.plane.appendChild(r.layer);
+					r.plane = info.plane;
+					r.placed = null;
+					r.settled = false;
+				}
+			});
+		} else {
+			if (info.plane) {
+				info.plane.remove();
+				info.plane = null;
+			}
+			info.recs.forEach((r) => {
+				if (r.plane !== null) {
+					insertLayerSibling(r);
+					r.settled = false;
+				}
+			});
+			if (info.recs.size === 0) stages.delete(stageEl);
+		}
+	}
+
 	// A ResizeObserver always delivers one notification right after observe(). Treating it as a resize
 	// invalidated every record at startup and made the first pass run twice. Only real size changes count.
 	const roSizes = new WeakMap();
-	function observe(el) {
-		if (typeof ResizeObserver === 'undefined') return;
+	function observeTarget(target) {
+		if (!target || typeof ResizeObserver === 'undefined') return;
 		if (!observer) {
 			observer = new ResizeObserver((entries) => {
-				let changed = false;
 				for (const en of entries) {
 					const r = en.contentRect, prev = roSizes.get(en.target);
 					if (!prev) { roSizes.set(en.target, { w: r.width, h: r.height }); continue; } // first notification: baseline only
-					if (Math.abs(prev.w - r.width) > 0.5 || Math.abs(prev.h - r.height) > 0.5) { prev.w = r.width; prev.h = r.height; changed = true; }
+					if (Math.abs(prev.w - r.width) > 0.5 || Math.abs(prev.h - r.height) > 0.5) {
+						prev.w = r.width; prev.h = r.height;
+						window.j0.bus.emit('ipax-backdrop:invalidate', { reason: 'resize', target: en.target });
+					}
 				}
-				if (changed) window.j0.bus.emit('ipax-backdrop:invalidate', { reason: 'resize' });
 			});
 		}
-		observer.observe(el);
-		if (el.parentElement) observer.observe(el.parentElement);
+		observer.observe(target);
 	}
 
 	function attach(el) {
@@ -2421,55 +3353,288 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		if (known) return known;
 		const N = svc('names');
 		el.setAttribute(N.managedAttr, '');
-		const layer = document.createElement(N.layerTag), cv = document.createElement('canvas');
+		const layer = document.createElement(N.layerTag), cv = document.createElement('canvas'), bf = document.createElement('div');
 		layer.setAttribute('aria-hidden', 'true');
+		bf.setAttribute('data-ipax-backdrop-bf', '');
+		layer.appendChild(bf);
 		layer.appendChild(cv);
 		el.parentNode.insertBefore(layer, el);
-		const rec = { el, layer, cv, id: ++nextId, ready: false, placed: null, blurPx: 0, hiddenAt: 0, est: null, blurCv: null };
+
+		const bindWrapper = (targetRec) => {
+			const w = findWrapper(targetRec.el);
+			const st = w ? w.parentElement : null;
+			targetRec.wrapper = w;
+			targetRec.stageEl = st;
+			if (w && st) {
+				wrapperToRec.set(w, targetRec);
+				observeTarget(w);
+				let info = stages.get(st);
+				if (!info) {
+					info = { el: st, plane: null, recs: new Set(), minZ: Infinity };
+					stages.set(st, info);
+					observeTarget(st);
+				}
+				info.recs.add(targetRec);
+				syncStagePlane(st);
+			}
+		};
+
+		// If an earlier sibling claimed an ancestor of `el` as its private wrapper before `el` was marked,
+		// release that stale wrapper binding so both elements group under the shared stage plane.
+		const displaced = [];
+		for (let anc = el.parentElement; anc && anc !== document.body && anc !== document.documentElement; anc = anc.parentElement) {
+			const prevRec = wrapperToRec.get(anc);
+			if (prevRec && prevRec.el !== el) {
+				wrapperToRec.delete(anc);
+				if (prevRec.stageEl && stages.has(prevRec.stageEl)) {
+					const oldInfo = stages.get(prevRec.stageEl);
+					oldInfo.recs.delete(prevRec);
+					syncStagePlane(prevRec.stageEl);
+				}
+				prevRec.wrapper = null;
+				prevRec.stageEl = null;
+				displaced.push(prevRec);
+			}
+		}
+
+		const rec = {
+			el, layer, cv, bf, id: ++nextId, ready: false, placed: null, m: null,
+			ext: { l: 0, t: 0, r: 0, b: 0 }, blurPx: 0, hiddenAt: 0,
+			est: null, blurCv: null, halo: null,
+			wrapper: null, stageEl: null, plane: null, z: 0, domOrder: 0
+		};
 		records.set(el, rec);
-		observe(el);
+		observeTarget(el);
+		if (el.parentElement) observeTarget(el.parentElement);
+
+		for (let i = 0; i < displaced.length; i++) bindWrapper(displaced[i]);
+		bindWrapper(rec);
+
 		return rec;
+	}
+
+	function detach(el) {
+		const rec = records.get(el);
+		if (!rec) return;
+		const N = svc('names');
+		rec.layer.remove();
+		rec.el.removeAttribute(N.managedAttr);
+		records.delete(el);
+		if (rec.wrapper) wrapperToRec.delete(rec.wrapper);
+		if (rec.stageEl && stages.has(rec.stageEl)) {
+			const info = stages.get(rec.stageEl);
+			info.recs.delete(rec);
+			syncStagePlane(rec.stageEl);
+		}
+	}
+
+	function pruneDisconnected() {
+		const removed = [];
+		records.forEach((rec, el) => {
+			if (!el.isConnected) removed.push(rec);
+		});
+		for (let i = 0; i < removed.length; i++) detach(removed[i].el);
+		return removed;
 	}
 
 	function detachAll() {
 		const N = svc('names');
 		records.forEach((rec) => { rec.layer.remove(); rec.el.removeAttribute(N.managedAttr); });
+		stages.forEach((info) => { if (info.plane) info.plane.remove(); });
 		records.clear();
+		wrapperToRec.clear();
+		stages.clear();
 		if (observer) { observer.disconnect(); observer = null; }
+	}
+
+	function refreshOrder() {
+		const list = Array.from(records.values());
+		list.sort((a, b) => {
+			if (a.el === b.el) return 0;
+			const pos = a.el.compareDocumentPosition(b.el);
+			return (pos & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+		});
+		for (let i = 0; i < list.length; i++) list[i].domOrder = i;
+	}
+
+	function ownerRecord(el) {
+		let curr = el;
+		while (curr && curr !== document.body && curr !== document.documentElement) {
+			const r = records.get(curr) || wrapperToRec.get(curr);
+			if (r) return r;
+			curr = curr.parentElement;
+		}
+		return undefined;
+	}
+
+	function isWrapper(el) {
+		return wrapperToRec.has(el);
+	}
+
+	function isStageOrAncestor(el) {
+		if (!el || el.nodeType !== 1) return false;
+		if (stages.has(el)) return true;
+		for (const st of stages.keys()) {
+			if (el.contains(st)) return true;
+		}
+		return false;
+	}
+
+	function recordsForTarget(target) {
+		if (!target || target.nodeType !== 1) return [];
+		const direct = records.get(target) || wrapperToRec.get(target);
+		if (direct) return [direct];
+		if (stages.has(target)) return Array.from(stages.get(target).recs);
+		const N = svc('names');
+		const host = target.closest && target.closest('[' + N.managedAttr + ']');
+		if (host && records.has(host)) return [records.get(host)];
+		const out = [];
+		records.forEach((rec) => {
+			if (target.contains(rec.el)) out.push(rec);
+		});
+		return out;
+	}
+
+	function isAbove(a, b) {
+		if (a.z !== b.z) return a.z > b.z;
+		return a.domOrder > b.domOrder;
+	}
+
+	function layersBelow(rec, R) {
+		const out = [];
+		records.forEach((other) => {
+			if (other === rec || !other.ready || other.cv.width <= 0 || other.cv.height <= 0) return;
+			if (other.plane !== rec.plane) return;
+			if (other.z > rec.z || (other.z === rec.z && other.domOrder >= rec.domOrder)) return;
+			const or = other.layer.getBoundingClientRect();
+			if (or.width <= 0 || or.height <= 0) return;
+			if (or.left >= R.right || or.right <= R.left || or.top >= R.bottom || or.bottom <= R.top) return;
+			out.push({
+				id: 1e6 + other.id,
+				k: 'lay',
+				cv: other.cv,
+				r: or,
+				a: 1,
+				nocut: true,
+				z: other.z,
+				domOrder: other.domOrder
+			});
+		});
+		out.sort((a, b) => (a.z - b.z) || (a.domOrder - b.domOrder));
+		return out;
 	}
 
 	/** READ phase. Touches layout; call it for every record BEFORE any apply(). */
 	function measure(rec) {
 		const e = rec.el;
-		return { l: e.offsetLeft, t: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight };
+		const ecs = getComputedStyle(e);
+		const ez = parseInt(ecs.zIndex, 10);
+
+		if (rec.plane && rec.wrapper && rec.stageEl) {
+			const er = e.getBoundingClientRect();
+			const sr = rec.stageEl.getBoundingClientRect();
+			const sw = rec.stageEl.offsetWidth, sh = rec.stageEl.offsetHeight;
+			const sx = sw > 0 ? sr.width / sw : 1;
+			const sy = sh > 0 ? sr.height / sh : 1;
+			const wcs = getComputedStyle(rec.wrapper);
+			const wz = parseInt(wcs.zIndex, 10);
+			const z = !isNaN(wz) ? wz : (!isNaN(ez) ? ez : 0);
+			return {
+				l: (er.left - sr.left) / sx,
+				t: (er.top - sr.top) / sy,
+				w: er.width / sx,
+				h: er.height / sy,
+				z,
+				wz,
+				op: wcs.opacity,
+				vis: wcs.visibility,
+				disp: wcs.display
+			};
+		}
+
+		let z = !isNaN(ez) ? ez : 0;
+		if (rec.wrapper) {
+			const wz = parseInt(getComputedStyle(rec.wrapper).zIndex, 10);
+			if (!isNaN(wz)) z = wz;
+		}
+		return {
+			l: e.offsetLeft,
+			t: e.offsetTop,
+			w: e.offsetWidth,
+			h: e.offsetHeight,
+			z,
+			wz: NaN,
+			op: '',
+			vis: '',
+			disp: ''
+		};
 	}
 
-	/** WRITE phase. Writes styles only when the geometry really changed. */
-	function apply(rec, m) {
-		const p = rec.placed;
-		if (p && p.l === m.l && p.t === m.t && p.w === m.w && p.h === m.h) return;
-		const s = rec.layer.style;
-		s.left = m.l + 'px'; s.top = m.t + 'px';
-		s.width = m.w + 'px'; s.height = m.h + 'px';
-		
-		// Auditoría de geometría y radio asignado
-		/*
-		console.log('[ipax-backdrop:debug] apply geometry:', {
-			el: rec.el.className,
-			geometry: m,
-			computedRadius: getComputedStyle(rec.layer).borderRadius
+	function updatePlaneStacking(stageEl) {
+		const info = stages.get(stageEl);
+		if (!info || !info.plane) return;
+		let minZ = Infinity;
+		info.recs.forEach((r) => {
+			if (r.z < minZ) minZ = r.z;
 		});
-		*/
-		
-		rec.placed = m;
+		const nextZ = (isFinite(minZ) && minZ > 1) ? String(minZ - 1) : '';
+		if (info.plane.style.zIndex !== nextZ) info.plane.style.zIndex = nextZ;
+	}
+
+	/** WRITE phase. Writes styles only when the geometry or stacking really changed. */
+	function apply(rec, m) {
+		rec.m = m;
+		rec.z = m.z;
+		const x = rec.ext, l = m.l - x.l, t = m.t - x.t, w = m.w + x.l + x.r, h = m.h + x.t + x.b;
+		const zStr = rec.plane ? (isNaN(m.wz) ? '' : String(m.wz)) : '';
+		const opStr = rec.plane ? m.op : '';
+		const visStr = rec.plane ? m.vis : '';
+		const dispStr = rec.plane ? (m.disp === 'none' ? 'none' : '') : '';
+
+		const p = rec.placed;
+		if (
+			p &&
+			p.l === l && p.t === t && p.w === w && p.h === h &&
+			p.bl === x.l && p.bt === x.t && p.bw === m.w && p.bh === m.h &&
+			p.z === zStr && p.op === opStr && p.vis === visStr && p.disp === dispStr
+		) {
+			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
+			return;
+		}
+
+		const s = rec.layer.style;
+		s.left = l + 'px'; s.top = t + 'px';
+		s.width = w + 'px'; s.height = h + 'px';
+		if (rec.plane) {
+			if (s.zIndex !== zStr) s.zIndex = zStr;
+			if (s.opacity !== opStr) s.opacity = opStr;
+			if (s.visibility !== visStr) s.visibility = visStr;
+			if (s.display !== dispStr) s.display = dispStr;
+			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
+		}
+
+		const b = rec.bf.style; // the blur element covers the box only
+		b.left = x.l + 'px'; b.top = x.t + 'px';
+		b.width = m.w + 'px'; b.height = m.h + 'px';
+
+		rec.placed = { l, t, w, h, bl: x.l, bt: x.t, bw: m.w, bh: m.h, z: zStr, op: opStr, vis: visStr, disp: dispStr };
+	}
+
+	/** Change how far the layer grows beyond the box. Returns true if it changed (the layer rect must be re-read). */
+	function setExt(rec, ext) {
+		const x = rec.ext;
+		if (x.l === ext.l && x.t === ext.t && x.r === ext.r && x.b === ext.b) return false;
+		rec.ext = { l: ext.l, t: ext.t, r: ext.r, b: ext.b };
+		if (rec.m) apply(rec, rec.m);
+		return true;
 	}
 
 	function place(rec) { apply(rec, measure(rec)); }
 
 	function resetBlurStyle(rec) {
 		if (!rec.blurPx) return;
-		rec.cv.style.backdropFilter = '';
-		rec.cv.style.webkitBackdropFilter = '';
+		rec.bf.style.backdropFilter = '';
+		rec.bf.style.webkitBackdropFilter = '';
 		rec.blurPx = 0;
 	}
 
@@ -2494,11 +3659,11 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		if (blurPx !== rec.blurPx) {
 			if (blurPx > 0) {
 				const b = 'blur(' + blurPx + 'px)';
-				rec.cv.style.backdropFilter = b;
-				rec.cv.style.webkitBackdropFilter = b;
+				rec.bf.style.backdropFilter = b;
+				rec.bf.style.webkitBackdropFilter = b;
 			} else {
-				rec.cv.style.backdropFilter = '';
-				rec.cv.style.webkitBackdropFilter = '';
+				rec.bf.style.backdropFilter = '';
+				rec.bf.style.webkitBackdropFilter = '';
 			}
 			rec.blurPx = blurPx;
 		}
@@ -2517,12 +3682,11 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		rec.cv.width = 0; rec.cv.height = 0;
 		rec.est = null;
 		rec.blurCv = null;
+		rec.halo = null;
 		rec.ready = false;
 		rec.settled = false;
 		rec.lastW = 0; rec.lastH = 0;
-		rec.blurPx = 0;
-		rec.cv.style.backdropFilter = '';
-		rec.cv.style.webkitBackdropFilter = '';
+		resetBlurStyle(rec);
 	}
 
 	/** Release every record that is not in visibleSet and has been hidden longer than ttlMs. Returns how many. */
@@ -2538,14 +3702,14 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	}
 
 	function withHitTesting(rec, fn) {
-		const st = rec.layer.style, prev = st.pointerEvents;
-		st.pointerEvents = 'auto';
-		try { return fn(); } finally { st.pointerEvents = prev; }
+		return fn();
 	}
 
 	window.j0.register('ipax-backdrop:compositor', {
-		ensureStyle, attach, detachAll, recordFor: (el) => records.get(el),
-		measure, apply, place, draw, clear, release, sweep, withHitTesting
+		ensureStyle, attach, detach, detachAll, pruneDisconnected, refreshOrder,
+		recordFor: (el) => records.get(el), ownerRecord, isWrapper, isStageOrAncestor,
+		recordsForTarget, layersBelow, isAbove,
+		measure, apply, setExt, place, draw, clear, release, sweep, withHitTesting
 	});
 })();
 ;
@@ -2558,15 +3722,12 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
  * CHAPTER 9 - PUBLIC API. The only service meant for library users.
  *
  *   const api = window.j0.get('ipax-backdrop');
- *   api.version      '0.1.0'
- *   api.config       live configuration object (backend, cellSize, maxPixels, autoStart)
+ *   api.version      '0.1.10'
+ *   api.config       live configuration object
  *   api.start()      scan the page and start (done automatically unless config.autoStart is false)
  *   api.stop()       remove every layer and stop
  *   api.refresh()    re-scan (new elements or rules) and recompute
  *   api.backend()    'webgl' | 'cpu' | '' (empty until the first render)
- *
- * Listen to events with window.j0.bus.on('ipax-backdrop:updated', fn), etc.
- * (list in 0010-nucleo.js).
  */
 (function () {
 	'use strict';
@@ -2575,7 +3736,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const api = {
-		version: '0.1.05',
+		version: '0.1.10',
 		start: () => svc('orchestrator').start(),
 		stop: () => svc('orchestrator').stop(),
 		refresh: () => svc('orchestrator').refresh(),

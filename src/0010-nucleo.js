@@ -31,6 +31,8 @@
  *   image-loaded  {}                                  a background image finished loading
  *   invalidate    {reason}                            geometry changed, a refresh is needed
  */
+
+
 (function () {
 	'use strict';
 
@@ -41,10 +43,15 @@
 	const j0 = window.j0;
 
 	const names = Object.freeze({
-		propPrefix: '--ipax-backdrop-',          // CSS custom properties read by the reader
+		propPrefix: '--ipax-backdrop-',          // CSS custom properties for container backdrop
+		textPrefix: '--ipax-text-',              // CSS custom properties for glyph-contour effect
+		boxShorthand: '--ipax-backdrop',         // shorthand property for container
+		textShorthand: '--ipax-text',            // shorthand property for glyph contour
+		modeProp: '--ipax-mode',                 // shared OKLab solver mode
 		layerTag: 'ipax-backdrop-layer',         // element created under every managed element
 		managedAttr: 'data-ipax-backdrop-managed', // set by the compositor on managed elements
-		markerAttr: 'data-ipax-backdrop'         // optional opt-in marker set by the page author
+		markerAttr: 'data-ipax-backdrop',        // optional opt-in marker for container
+		textMarkerAttr: 'data-ipax-text'         // optional opt-in marker for glyph contour
 	});
 
 	const limits = Object.freeze({
@@ -61,7 +68,6 @@
 		autoStart: true     // start on DOMContentLoaded
 	};
 
-	// Payload contracts, checked by the j0 bus when window.j0.QA is truthy.
 	const S = j0.bus.schema;
 	S['ipax-backdrop:ready'] = {};
 	S['ipax-backdrop:updated'] = { element: 'object', ms: 'number', backend: 'string' };

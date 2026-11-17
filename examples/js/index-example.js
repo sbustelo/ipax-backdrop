@@ -50,7 +50,16 @@
 	stage.addEventListener('pointerup', endDrag);
 	stage.addEventListener('pointercancel', endDrag);
 
+	
 	/* ---------- Controls: they only write CSS custom properties and classes ---------- */
+	const textState = { contrast: 7, halo: 12, spread: 35, blur: 6 };
+	const syncTextProps = () => {
+		const boxC = stage.querySelector('.ex-text-only');
+		if (boxC) {
+			boxC.style.setProperty('--ipax-text', '0 2px ' + textState.halo + 'px ' + textState.spread + '% ' + textState.contrast + ':1 ' + textState.blur + 'px');
+		}
+	};
+
 	root.addEventListener('input', (e) => {
 		const c = e.target.closest('[data-ctl]');
 		if (!c) return;
@@ -62,37 +71,44 @@
 		}
 
 		const k = c.dataset.ctl;
-		const applyProp = (prop, val) => stage.querySelectorAll('.ex-glass').forEach(g => g.style.setProperty(prop, val));
+		const applyBoxProp = (prop, val) => stage.querySelectorAll('.ex-glass').forEach(g => g.style.setProperty(prop, val));
 
-		if (k === 'mode') applyProp('--ipax-backdrop-mode', c.value);
-		else if (k === 'contrast') applyProp('--ipax-backdrop-contrast', c.value);
+		if (k === 'effect-mode') {
+			hero.classList.toggle('ex-use-overlays', c.value === 'overlays');
+			hero.classList.toggle('ex-effect-none', c.value === 'none');
+		} else if (k === 'mode') {
+			stage.querySelectorAll('.ex-glass, .ex-text-only').forEach(g => g.style.setProperty('--ipax-mode', c.value));
+		} else if (k === 'contrast') applyBoxProp('--ipax-backdrop-contrast', c.value);
 		else if (k === 'backend') document.documentElement.style.setProperty('--ipax-backdrop-backend', c.value);
 		else if (k === 'performance') {
 			const v = c.value === '0' ? '0' : c.value + 'fps';
 			document.documentElement.style.setProperty('--ipax-backdrop-performance', v);
 		}
 		else if (k === 'feather') {
-			['top', 'right', 'bottom', 'left'].forEach(s => applyProp('--ipax-backdrop-feather-' + s, ''));
-			applyProp('--ipax-backdrop-feather', c.value + 'px');
+			['top', 'right', 'bottom', 'left'].forEach(s => applyBoxProp('--ipax-backdrop-feather-' + s, ''));
+			applyBoxProp('--ipax-backdrop-feather', c.value + 'px');
 			['top', 'right', 'bottom', 'left'].forEach(side => {
 				root.querySelectorAll('[data-ctl="feather-' + side + '"]').forEach(input => input.value = c.value);
 			});
 		} else if (k.indexOf('feather-') === 0) {
 			const side = k.replace('feather-', '');
-			applyProp('--ipax-backdrop-feather-' + side, c.value + 'px');
+			applyBoxProp('--ipax-backdrop-feather-' + side, c.value + 'px');
 			const sides = ['top', 'right', 'bottom', 'left'];
 			const vals = sides.map(s => { const el = root.querySelector('input[data-ctl="feather-' + s + '"]'); return el ? el.value : null; });
 			if (vals.every(v => v !== null && v === vals[0])) {
 				root.querySelectorAll('[data-ctl="feather"]').forEach(el => el.value = vals[0]);
-				sides.forEach(s => applyProp('--ipax-backdrop-feather-' + s, ''));
-				applyProp('--ipax-backdrop-feather', vals[0] + 'px');
+				sides.forEach(s => applyBoxProp('--ipax-backdrop-feather-' + s, ''));
+				applyBoxProp('--ipax-backdrop-feather', vals[0] + 'px');
 			}
 		} else if (k === 'blur') {
 			stage.style.setProperty('--ex-blur', c.value + 'px');
 			stage.querySelectorAll('.ex-glass, .example-hero-block').forEach(g => g.style.setProperty('--ipax-backdrop-blur', c.value + 'px'));
-		} else if (k === 'overlay') stage.classList.toggle('ex-s-overlay', c.checked);
+		} else if (k === 'text-contrast') { textState.contrast = parseFloat(c.value) || 1; syncTextProps(); }
+		else if (k === 'text-halo') { textState.halo = parseFloat(c.value) || 0; syncTextProps(); }
+		else if (k === 'text-spread') { textState.spread = parseFloat(c.value) || 0; syncTextProps(); }
+		else if (k === 'text-blur') { textState.blur = parseFloat(c.value) || 0; syncTextProps(); }
+		else if (k === 'overlay') stage.classList.toggle('ex-s-overlay', c.checked);
 		else if (k === 'grad') stage.classList.toggle('ex-s-grad', c.checked);
-		else if (k === 'master-toggle' || k === 'effect-hero') hero.classList.toggle('ex-raw', !c.checked);
 		else if (k === 'raw' || k === 'effect-stage') stage.classList.toggle('ex-raw', !c.checked);
 		else if (k === 'textcolor') stage.style.setProperty('--ex-custom-color', c.value);
 

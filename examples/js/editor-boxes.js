@@ -1,3 +1,4 @@
+// PATH: examples/js/editor-boxes.js
 (function () {
 	'use strict';
 
@@ -22,10 +23,24 @@
 	function applyIpaxProps(box) {
 		const glass = qs('.ed-glass', box);
 		const ip = box._state.ipax;
-		glass.style.setProperty('--ipax-backdrop-mode', ip.mode);
-		glass.style.setProperty('--ipax-backdrop-contrast', String(ip.contrast));
-		glass.style.setProperty('--ipax-backdrop-blur', `${ip.blur}px`);
-		glass.style.setProperty('--ipax-backdrop-feather', `${ip.feather.t}px ${ip.feather.r}px ${ip.feather.b}px ${ip.feather.l}px`);
+		glass.style.setProperty('--ipax-mode', ip.mode);
+
+		if (ip.boxEnabled !== false) {
+			glass.style.setProperty('--ipax-backdrop-contrast', String(ip.contrast));
+			glass.style.setProperty('--ipax-backdrop-blur', `${ip.blur}px`);
+			glass.style.setProperty('--ipax-backdrop-feather', `${ip.feather.t}px ${ip.feather.r}px ${ip.feather.b}px ${ip.feather.l}px`);
+		} else {
+			glass.style.setProperty('--ipax-backdrop-contrast', '1');
+			glass.style.setProperty('--ipax-backdrop-blur', '0px');
+			glass.style.setProperty('--ipax-backdrop-feather', '0px');
+		}
+
+		const t = ip.text || { contrast: 7, halo: 12, spread: 35, blur: 0, x: 0, y: 0 };
+		if (ip.textEnabled && (t.contrast > 1 || t.blur > 0)) {
+			glass.style.setProperty('--ipax-text', `${t.x}px ${t.y}px ${t.halo}px ${t.spread}% ${t.contrast}:1 ${t.blur}px`);
+		} else {
+			glass.style.removeProperty('--ipax-text');
+		}
 		refreshBackdrop();
 	}
 
@@ -56,11 +71,19 @@
 			fontStatus: 'System font stack', fontError: false,
 			padding: { t: 24, r: 24, b: 24, l: 24 },
 			bg: { type: 'none', image: '', imgFit: 'cover', imgOpacity: 100, color: '#000000', colorAlpha: 40, gradC1: '#000000', gradA1: 60, gradC2: '#1a4fd6', gradA2: 30, gradAngle: 135 },
-			ipax: { mode: 'default', contrast: opts.contrast ?? 4.5, blur: opts.blur ?? 8, feather: { t: fVal, r: fVal, b: fVal, l: fVal } }
+			ipax: {
+				mode: 'default',
+				boxEnabled: true,
+				contrast: opts.contrast ?? 4.5,
+				blur: opts.blur ?? 8,
+				feather: { t: fVal, r: fVal, b: fVal, l: fVal },
+				textEnabled: false,
+				text: { contrast: 7, halo: 12, spread: 35, blur: 0, x: 0, y: 0 }
+			}
 		};
 
 		const handles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((d) => `<span class="ed-handle" data-dir="${d}"></span>`).join('');
-		box.innerHTML = `<div class="ed-glass" data-ipax-backdrop><div class="ed-box-bg"></div><div class="ed-box-text" contenteditable="true">${opts.html ?? (opts.text || '')}</div></div>${handles}`;
+		box.innerHTML = `<div class="ed-glass" data-ipax-backdrop data-ipax-text><div class="ed-box-bg"></div><div class="ed-box-text" contenteditable="true">${opts.html ?? (opts.text || '')}</div></div>${handles}`;
 
 		const glass = qs('.ed-glass', box);
 		glass.style.fontFamily = opts.fontFamily || box._state.fontInput;
@@ -69,7 +92,7 @@
 		glass.style.color = opts.color || '#ffffff';
 		glass.style.textAlign = opts.textAlign || 'left';
 		glass.style.justifyContent = opts.justifyContent || 'center';
-		
+
 		const p = box._state.padding;
 		glass.style.padding = `${p.t}px ${p.r}px ${p.b}px ${p.l}px`;
 
@@ -124,19 +147,17 @@
 		refreshBackdrop();
 	}
 
-	// Escuchamos en workspace para garantizar que un clic fuera de las cajas deseleccione,
-	// incluso si el stage tuviera problemas de dimensiones.
 	const workspace = qs('[data-ed-role="workspace"]');
 	workspace.addEventListener('pointerdown', (e) => {
 		const handle = e.target.closest('.ed-handle'), box = e.target.closest('.ed-box');
-		
+
 		if (!box) {
 			selectBox(null);
 			return;
 		}
-		
+
 		selectBox(box);
-		
+
 		if (handle) {
 			e.preventDefault();
 			const dir = handle.dataset.dir, sx = e.clientX, sy = e.clientY;
@@ -149,6 +170,7 @@
 				if (dir.includes('w')) { const cdx = Math.min(sw - 80, dx); nl = sl + cdx; nw = sw - cdx; }
 				if (dir.includes('n')) { const cdy = Math.min(sh - 36, dy); nt = st + cdy; nh = sh - cdy; }
 				box.style.left = `${nl}px`; box.style.top = `${nt}px`; box.style.width = `${nw}px`; box.style.height = `${nh}px`;
+				emit('box:geom', box);
 				refreshBackdrop(); markDirty();
 			};
 			const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
@@ -177,6 +199,7 @@
 			if (!hasMoved && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) hasMoved = true;
 			syncAltClone(me.altKey);
 			box.style.left = `${originL + dx}px`; box.style.top = `${originT + dy}px`;
+			emit('box:geom', box);
 			refreshBackdrop(); markDirty();
 		};
 		const onUp = () => {

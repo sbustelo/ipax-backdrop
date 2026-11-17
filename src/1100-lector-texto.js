@@ -1,21 +1,17 @@
+// PATH: src/1100-lector-texto.js
 /**
  * ipax-backdrop / 1100-lector-texto.js
  * SPDX-License-Identifier: Apache-2.0
  *
- * CHAPTER 1 - READER (text): which colours does the text inside the element have?
+ * CHAPTER 1 - READER (text): text colour runs and calibrated per-word glyph boxes.
  *
  * Service 'ipax-backdrop:reader-text':
- *   readColors(el, rect, baseColorStr) -> {base:[r,g,b], runs:[{x0,y0,x1,y1,c}], truncated}
+ *   readColors(el, rect, baseColorStr, wantTexts)
+ *     -> {base:[r,g,b], runs:[{x0,y0,x1,y1,c}], truncated, texts}
  *
- * The base colour is the computed `color` of the element. A "run" is a text
- * node whose colour differs from the base (for example a <b> or <span> with
- * another colour). Run rectangles are relative to `rect` (the element box),
- * in CSS pixels, one rectangle per line box. Only limits.maxRuns rectangles
- * are kept; `truncated` tells the orchestrator when some were dropped.
- *
- * Why runs matter: white text needs a darker backdrop and black text a lighter
- * one. Each run asks for its own correction, blended smoothly with its
- * neighbours by the kernel.
+ * When `wantTexts` is true (--ipax-text active), `texts` records per-word line rects
+ * along with the computed font stack, letter-spacing and text-transform so the glyph
+ * mask rasterizer (2400-resolutor-halo.js) aligns 1:1 with browser glyph rendering.
  */
 (function () {
 	'use strict';
@@ -23,25 +19,73 @@
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
-	function readColors(el, rect, baseStr) {
+	function readColors(el, rect, baseStr, wantTexts) {
 		const C = svc('color'), max = svc('limits').maxRuns;
 		const toRgb = (str) => { const c = C.parseCssColor(str); return c ? [c[0], c[1], c[2]] : [255, 255, 255]; };
-		const base = toRgb(baseStr), runs = [];
+		const base = toRgb(baseStr), runs = [], texts = wantTexts ? [] : null;
 		let truncated = false;
 		const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), range = document.createRange();
 		let node;
+
 		while ((node = tw.nextNode())) {
-			if (!node.nodeValue.trim()) continue;
-			const c = toRgb(getComputedStyle(node.parentElement).color);
-			if (Math.abs(c[0] - base[0]) + Math.abs(c[1] - base[1]) + Math.abs(c[2] - base[2]) < 24) continue;
-			range.selectNodeContents(node);
-			for (const r of range.getClientRects()) {
-				if (r.width <= 0 || r.height <= 0) continue;
-				if (runs.length >= max) { truncated = true; continue; }
-				runs.push({ x0: r.left - rect.left, y0: r.top - rect.top, x1: r.right - rect.left, y1: r.bottom - rect.top, c });
+			const raw = node.nodeValue;
+			if (!raw || !raw.trim()) continue;
+			const cs = getComputedStyle(node.parentElement);
+			const c = toRgb(cs.color);
+			const differs = Math.abs(c[0] - base[0]) + Math.abs(c[1] - base[1]) + Math.abs(c[2] - base[2]) >= 24;
+			if (!differs && !wantTexts) continue;
+
+			if (differs) {
+				range.selectNodeContents(node);
+				for (const r of range.getClientRects()) {
+					if (r.width <= 0 || r.height <= 0) continue;
+					if (runs.length >= max) { truncated = true; break; }
+					runs.push({
+						x0: r.left - rect.left,
+						y0: r.top - rect.top,
+						x1: r.right - rect.left,
+						y1: r.bottom - rect.top,
+						c
+					});
+				}
+			}
+
+			if (wantTexts) {
+				const fs = parseFloat(cs.fontSize) || 16;
+				const fontStyle = cs.fontStyle || 'normal';
+				const fontWeight = cs.fontWeight || '400';
+				const fontFamily = cs.fontFamily || 'sans-serif';
+				const ls = parseFloat(cs.letterSpacing);
+				const letterSpacing = isNaN(ls) ? 0 : ls;
+				const textTransform = cs.textTransform || 'none';
+
+				const re = /\S+/g;
+				let m;
+				while ((m = re.exec(raw))) {
+					range.setStart(node, m.index);
+					range.setEnd(node, m.index + m[0].length);
+					const rects = range.getClientRects();
+					for (let i = 0; i < rects.length; i++) {
+						const r = rects[i];
+						if (r.width <= 0 || r.height <= 0) continue;
+						texts.push({
+							x0: r.left - rect.left,
+							y0: r.top - rect.top,
+							x1: r.right - rect.left,
+							y1: r.bottom - rect.top,
+							word: m[0],
+							fs,
+							fontStyle,
+							fontWeight,
+							fontFamily,
+							letterSpacing,
+							textTransform
+						});
+					}
+				}
 			}
 		}
-		return { base, runs, truncated };
+		return { base, runs, truncated, texts };
 	}
 
 	window.j0.register('ipax-backdrop:reader-text', { readColors });

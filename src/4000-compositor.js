@@ -4,75 +4,93 @@
  *
  * CHAPTER 4 - COMPOSITOR: where the result lives in the page.
  *
- * Every managed element gets ONE sibling layer, inserted immediately BEFORE it:
+ * Automatic two-level layer stacking (zero CSS plane configuration required):
  *
- *     <ipax-backdrop-layer aria-hidden="true"><canvas></canvas></ipax-backdrop-layer>
- *     <h1 style="...">The managed element</h1>
+ *   Level 1 (Direct siblings / shared stacking context):
+ *     <ipax-backdrop-layer aria-hidden="true" style="z-index: 0">...</ipax-backdrop-layer>
+ *     <h1 style="...">The managed element (z-index: 1 via :where(), specificity 0)</h1>
+ *     Every managed element stays above every sibling backdrop layer while preserving
+ *     author z-index overrides, own background, gradients, ::before/::after and text-shadow.
  *
- * Why a sibling and not a child: the element keeps its own background,
- * gradient, ::before / ::after, text-shadow and, above all, its own
- * `backdrop-filter`, which then blurs OUR layer together with the real
- * backdrop. A child would be painted on top of the element's own background
- * and would not be blurred by its backdrop-filter.
+ *   Level 2 (Managed elements enclosed in stacking-context wrappers, e.g. .ed-box[z-index]):
+ *     When a common container holds 2 or more managed elements inside stacking-context wrappers,
+ *     all <ipax-backdrop-layer> nodes are projected into an isolated <ipax-backdrop-plane>
+ *     inserted in the common container immediately before the first wrapper (above background
+ *     elements such as .ed-stage-bg and below all wrappers), ordered internally by each
+ *     wrapper's effective z-index and mirroring wrapper opacity / visibility / display.
  *
- * Why the element must be positioned: a positioned element is painted above a
- * non-positioned one regardless of DOM order, so a static element's text would
- * end up UNDER our absolute layer. The internal stylesheet below gives managed
- * elements `position: relative` through `:where()` (specificity 0): any
- * `position` the author declares wins.
+ * The CSS blur fallback (backdrop-filter, used where the backdrop is unknown) lives on
+ * <div data-ipax-backdrop-bf>, which always covers the BOX only, so a halo that goes
+ * outside the box never blurs the real page. <canvas> is positioned above it so the
+ * kernel's feather-masked blur governs known pixels.
  *
- * Geometry: the layer copies offsetLeft / offsetTop / offsetWidth / offsetHeight
- * of the element. They share the same containing block because they are
- * siblings. Moving the parent moves both; size changes are watched with a
- * ResizeObserver (which emits 'ipax-backdrop:invalidate').
- *
- * PERFORMANCE NOTES (v0.1.05)
+ * PERFORMANCE NOTES (v0.1.05+)
  *   - Placement is split in two phases so a caller that handles many records
  *     can READ all geometry first and WRITE it afterwards (no layout thrashing):
  *       const m = records.map(measure);  records.forEach((r, i) => apply(r, m[i]));
- *     apply() skips the style writes when nothing changed (rec.placed cache).
+ *     apply() skips style writes when nothing changed (rec.placed cache).
  *   - draw() accepts result.srcRect {x, y, w, h}: a sub-rectangle of a source
  *     canvas that is larger than the target (shared WebGL canvas kept at its
- *     maximum size). Without srcRect the whole source is used (old behaviour).
+ *     maximum size). Without srcRect the whole source is used.
  *   - release() / sweep() free the canvas memory of layers that have been out
- *     of view for a while. A released record is flagged unsettled so it is
- *     recomputed when it comes back.
+ *     of view for a while.
  *
  * Service 'ipax-backdrop:compositor':
- *   ensureStyle()                 inject the internal stylesheet (idempotent)
- *   attach(el) -> rec             create the layer {el, layer, cv, id, ready}
- *   detachAll()                   remove every layer and observer
+ *   ensureStyle()                    inject the internal stylesheet (idempotent)
+ *   attach(el) -> rec                create the layer {el, layer, cv, bf, id, ready, ext, ...}
+ *   detach(el)                       remove one layer and clean up its stage plane if needed
+ *   detachAll()                      remove every layer, plane and observer
+ *   pruneDisconnected() -> rec[]     detach records whose elements were removed from DOM
+ *   refreshOrder()                   recompute DOM paint order across all active records
  *   recordFor(el) -> rec | undefined
- *   measure(rec) -> {l, t, w, h}  READ phase: element geometry (touches layout)
- *   apply(rec, m)                 WRITE phase: copy geometry to the layer (cached)
- *   place(rec)                    measure + apply (kept for compatibility)
- *   draw(rec, w, h, result, blurPx)  paint a kernel result into the layer canvas
- *   clear(rec)                    empty the layer
- *   release(rec)                  free canvas memory (backing store, scratch canvases)
- *   sweep(visibleSet, ttlMs)      release records hidden for longer than ttlMs
- *   withHitTesting(rec, fn)       run fn() with the layer reachable by
- *                                 elementsFromPoint (it is pointer-events:none otherwise)
+ *   ownerRecord(el) -> rec | undefined
+ *   isWrapper(el) -> boolean
+ *   isStageOrAncestor(el) -> boolean
+ *   recordsForTarget(el) -> rec[]
+ *   layersBelow(rec, R) -> descriptor[]
+ *   isAbove(a, b) -> boolean
+ *   measure(rec) -> geometry         READ phase
+ *   apply(rec, m)                    WRITE phase
+ *   setExt(rec, ext) -> boolean
+ *   place(rec)
+ *   draw(rec, w, h, result, blurPx)
+ *   clear(rec)
+ *   release(rec)
+ *   sweep(visibleSet, ttlMs)
+ *   withHitTesting(rec, fn)
  */
 (function () {
 	'use strict';
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
+	const PLANE_TAG = 'ipax-backdrop-plane';
 	const records = new Map();
+	const wrapperToRec = new Map();
+	const stages = new Map(); // stageEl -> { el, plane, recs: Set<rec>, minZ }
 	let nextId = 0, observer = null, styleEl = null;
+
+	function planeTagName() {
+		return svc('names').planeTag || PLANE_TAG;
+	}
 
 	/**
 	 * INTERNAL STYLESHEET (the only CSS this library injects).
-	 *   rule 1  managed elements are positioned (specificity 0, author wins)
-	 *   rule 2  the layer is an absolutely positioned, click-through box
-	 *   rule 3  its canvas fills it
+	 *   rule 1  managed elements are positioned at z-index 1 (specificity 0, author wins)
+	 *   rule 2  the layer is an absolutely positioned, click-through box at z-index 0
+	 *   rule 3  the blur element is an absolutely positioned box (covers the element box)
+	 *   rule 4  the canvas sits above the blur fallback element and fills the layer
+	 *   rule 5  the shared stage plane isolates layer z-indices below all wrappers
 	 */
 	function cssText() {
 		const N = svc('names');
+		const pTag = planeTagName();
 		return [
-			':where([' + N.managedAttr + ']){position:relative}',
-			N.layerTag + '{position:absolute;display:block;pointer-events:none;margin:0;padding:0}',
-			N.layerTag + '>canvas{display:block;width:100%;height:100%}'
+			':where([' + N.managedAttr + ']){position:relative;z-index:1}',
+			N.layerTag + '{position:absolute;display:block;pointer-events:none;margin:0;padding:0;z-index:0}',
+			N.layerTag + '>[data-ipax-backdrop-bf]{position:absolute;display:block;pointer-events:none;margin:0;padding:0;border-radius:inherit}',
+			N.layerTag + '>canvas{position:relative;display:block;width:100%;height:100%}',
+			pTag + '{position:absolute;inset:0;display:block;pointer-events:none;margin:0;padding:0;isolation:isolate}'
 		].join('\n');
 	}
 
@@ -84,24 +102,113 @@
 		document.head.appendChild(styleEl);
 	}
 
+	function createsStackingContext(el) {
+		if (!el || el.nodeType !== 1) return false;
+		const cs = getComputedStyle(el);
+		if (cs.position !== 'static' && cs.zIndex !== 'auto') return true;
+		if (cs.isolation === 'isolate') return true;
+		if (parseFloat(cs.opacity) < 1) return true;
+		if (cs.transform !== 'none') return true;
+		return false;
+	}
+
+	/**
+	 * Finds the outermost stacking-context wrapper around `el` that contains no other
+	 * managed elements. Returns null if `el` participates directly in a shared context.
+	 */
+	function findWrapper(el) {
+		const N = svc('names');
+		const managedSel = '[' + N.managedAttr + ']';
+		let wrapper = null;
+		let curr = el.parentElement;
+		while (curr && curr !== document.body && curr !== document.documentElement) {
+			const allManaged = curr.querySelectorAll(managedSel);
+			if (allManaged.length > 1) break;
+			if (createsStackingContext(curr)) wrapper = curr;
+			curr = curr.parentElement;
+		}
+		return wrapper;
+	}
+
+	function insertLayerSibling(rec) {
+		if (rec.layer.parentNode !== rec.el.parentNode || rec.layer.nextSibling !== rec.el) {
+			rec.el.parentNode.insertBefore(rec.layer, rec.el);
+		}
+		rec.layer.style.zIndex = '';
+		rec.layer.style.opacity = '';
+		rec.layer.style.visibility = '';
+		rec.layer.style.display = '';
+		rec.plane = null;
+		rec.placed = null;
+	}
+
+	function syncStagePlane(stageEl) {
+		const info = stages.get(stageEl);
+		if (!info) return;
+
+		if (info.recs.size >= 2 && stageEl.isConnected) {
+			if (!info.plane) {
+				info.plane = document.createElement(planeTagName());
+				info.plane.setAttribute('aria-hidden', 'true');
+			}
+			// Insert immediately before the first wrapper in DOM order so background elements
+			// prior to the boxes (e.g. .ed-stage-bg) stay underneath the layer plane.
+			let firstWrapper = null;
+			for (let child = stageEl.firstElementChild; child; child = child.nextElementSibling) {
+				if (wrapperToRec.has(child) && info.recs.has(wrapperToRec.get(child))) {
+					firstWrapper = child;
+					break;
+				}
+			}
+			if (firstWrapper) {
+				if (info.plane.parentNode !== stageEl || info.plane.nextSibling !== firstWrapper) {
+					stageEl.insertBefore(info.plane, firstWrapper);
+				}
+			} else if (info.plane.parentNode !== stageEl) {
+				stageEl.appendChild(info.plane);
+			}
+
+			info.recs.forEach((r) => {
+				if (r.layer.parentNode !== info.plane) {
+					info.plane.appendChild(r.layer);
+					r.plane = info.plane;
+					r.placed = null;
+					r.settled = false;
+				}
+			});
+		} else {
+			if (info.plane) {
+				info.plane.remove();
+				info.plane = null;
+			}
+			info.recs.forEach((r) => {
+				if (r.plane !== null) {
+					insertLayerSibling(r);
+					r.settled = false;
+				}
+			});
+			if (info.recs.size === 0) stages.delete(stageEl);
+		}
+	}
+
 	// A ResizeObserver always delivers one notification right after observe(). Treating it as a resize
 	// invalidated every record at startup and made the first pass run twice. Only real size changes count.
 	const roSizes = new WeakMap();
-	function observe(el) {
-		if (typeof ResizeObserver === 'undefined') return;
+	function observeTarget(target) {
+		if (!target || typeof ResizeObserver === 'undefined') return;
 		if (!observer) {
 			observer = new ResizeObserver((entries) => {
-				let changed = false;
 				for (const en of entries) {
 					const r = en.contentRect, prev = roSizes.get(en.target);
 					if (!prev) { roSizes.set(en.target, { w: r.width, h: r.height }); continue; } // first notification: baseline only
-					if (Math.abs(prev.w - r.width) > 0.5 || Math.abs(prev.h - r.height) > 0.5) { prev.w = r.width; prev.h = r.height; changed = true; }
+					if (Math.abs(prev.w - r.width) > 0.5 || Math.abs(prev.h - r.height) > 0.5) {
+						prev.w = r.width; prev.h = r.height;
+						window.j0.bus.emit('ipax-backdrop:invalidate', { reason: 'resize', target: en.target });
+					}
 				}
-				if (changed) window.j0.bus.emit('ipax-backdrop:invalidate', { reason: 'resize' });
 			});
 		}
-		observer.observe(el);
-		if (el.parentElement) observer.observe(el.parentElement);
+		observer.observe(target);
 	}
 
 	function attach(el) {
@@ -109,55 +216,288 @@
 		if (known) return known;
 		const N = svc('names');
 		el.setAttribute(N.managedAttr, '');
-		const layer = document.createElement(N.layerTag), cv = document.createElement('canvas');
+		const layer = document.createElement(N.layerTag), cv = document.createElement('canvas'), bf = document.createElement('div');
 		layer.setAttribute('aria-hidden', 'true');
+		bf.setAttribute('data-ipax-backdrop-bf', '');
+		layer.appendChild(bf);
 		layer.appendChild(cv);
 		el.parentNode.insertBefore(layer, el);
-		const rec = { el, layer, cv, id: ++nextId, ready: false, placed: null, blurPx: 0, hiddenAt: 0, est: null, blurCv: null };
+
+		const bindWrapper = (targetRec) => {
+			const w = findWrapper(targetRec.el);
+			const st = w ? w.parentElement : null;
+			targetRec.wrapper = w;
+			targetRec.stageEl = st;
+			if (w && st) {
+				wrapperToRec.set(w, targetRec);
+				observeTarget(w);
+				let info = stages.get(st);
+				if (!info) {
+					info = { el: st, plane: null, recs: new Set(), minZ: Infinity };
+					stages.set(st, info);
+					observeTarget(st);
+				}
+				info.recs.add(targetRec);
+				syncStagePlane(st);
+			}
+		};
+
+		// If an earlier sibling claimed an ancestor of `el` as its private wrapper before `el` was marked,
+		// release that stale wrapper binding so both elements group under the shared stage plane.
+		const displaced = [];
+		for (let anc = el.parentElement; anc && anc !== document.body && anc !== document.documentElement; anc = anc.parentElement) {
+			const prevRec = wrapperToRec.get(anc);
+			if (prevRec && prevRec.el !== el) {
+				wrapperToRec.delete(anc);
+				if (prevRec.stageEl && stages.has(prevRec.stageEl)) {
+					const oldInfo = stages.get(prevRec.stageEl);
+					oldInfo.recs.delete(prevRec);
+					syncStagePlane(prevRec.stageEl);
+				}
+				prevRec.wrapper = null;
+				prevRec.stageEl = null;
+				displaced.push(prevRec);
+			}
+		}
+
+		const rec = {
+			el, layer, cv, bf, id: ++nextId, ready: false, placed: null, m: null,
+			ext: { l: 0, t: 0, r: 0, b: 0 }, blurPx: 0, hiddenAt: 0,
+			est: null, blurCv: null, halo: null,
+			wrapper: null, stageEl: null, plane: null, z: 0, domOrder: 0
+		};
 		records.set(el, rec);
-		observe(el);
+		observeTarget(el);
+		if (el.parentElement) observeTarget(el.parentElement);
+
+		for (let i = 0; i < displaced.length; i++) bindWrapper(displaced[i]);
+		bindWrapper(rec);
+
 		return rec;
+	}
+
+	function detach(el) {
+		const rec = records.get(el);
+		if (!rec) return;
+		const N = svc('names');
+		rec.layer.remove();
+		rec.el.removeAttribute(N.managedAttr);
+		records.delete(el);
+		if (rec.wrapper) wrapperToRec.delete(rec.wrapper);
+		if (rec.stageEl && stages.has(rec.stageEl)) {
+			const info = stages.get(rec.stageEl);
+			info.recs.delete(rec);
+			syncStagePlane(rec.stageEl);
+		}
+	}
+
+	function pruneDisconnected() {
+		const removed = [];
+		records.forEach((rec, el) => {
+			if (!el.isConnected) removed.push(rec);
+		});
+		for (let i = 0; i < removed.length; i++) detach(removed[i].el);
+		return removed;
 	}
 
 	function detachAll() {
 		const N = svc('names');
 		records.forEach((rec) => { rec.layer.remove(); rec.el.removeAttribute(N.managedAttr); });
+		stages.forEach((info) => { if (info.plane) info.plane.remove(); });
 		records.clear();
+		wrapperToRec.clear();
+		stages.clear();
 		if (observer) { observer.disconnect(); observer = null; }
+	}
+
+	function refreshOrder() {
+		const list = Array.from(records.values());
+		list.sort((a, b) => {
+			if (a.el === b.el) return 0;
+			const pos = a.el.compareDocumentPosition(b.el);
+			return (pos & Node.DOCUMENT_POSITION_FOLLOWING) ? -1 : 1;
+		});
+		for (let i = 0; i < list.length; i++) list[i].domOrder = i;
+	}
+
+	function ownerRecord(el) {
+		let curr = el;
+		while (curr && curr !== document.body && curr !== document.documentElement) {
+			const r = records.get(curr) || wrapperToRec.get(curr);
+			if (r) return r;
+			curr = curr.parentElement;
+		}
+		return undefined;
+	}
+
+	function isWrapper(el) {
+		return wrapperToRec.has(el);
+	}
+
+	function isStageOrAncestor(el) {
+		if (!el || el.nodeType !== 1) return false;
+		if (stages.has(el)) return true;
+		for (const st of stages.keys()) {
+			if (el.contains(st)) return true;
+		}
+		return false;
+	}
+
+	function recordsForTarget(target) {
+		if (!target || target.nodeType !== 1) return [];
+		const direct = records.get(target) || wrapperToRec.get(target);
+		if (direct) return [direct];
+		if (stages.has(target)) return Array.from(stages.get(target).recs);
+		const N = svc('names');
+		const host = target.closest && target.closest('[' + N.managedAttr + ']');
+		if (host && records.has(host)) return [records.get(host)];
+		const out = [];
+		records.forEach((rec) => {
+			if (target.contains(rec.el)) out.push(rec);
+		});
+		return out;
+	}
+
+	function isAbove(a, b) {
+		if (a.z !== b.z) return a.z > b.z;
+		return a.domOrder > b.domOrder;
+	}
+
+	function layersBelow(rec, R) {
+		const out = [];
+		records.forEach((other) => {
+			if (other === rec || !other.ready || other.cv.width <= 0 || other.cv.height <= 0) return;
+			if (other.plane !== rec.plane) return;
+			if (other.z > rec.z || (other.z === rec.z && other.domOrder >= rec.domOrder)) return;
+			const or = other.layer.getBoundingClientRect();
+			if (or.width <= 0 || or.height <= 0) return;
+			if (or.left >= R.right || or.right <= R.left || or.top >= R.bottom || or.bottom <= R.top) return;
+			out.push({
+				id: 1e6 + other.id,
+				k: 'lay',
+				cv: other.cv,
+				r: or,
+				a: 1,
+				nocut: true,
+				z: other.z,
+				domOrder: other.domOrder
+			});
+		});
+		out.sort((a, b) => (a.z - b.z) || (a.domOrder - b.domOrder));
+		return out;
 	}
 
 	/** READ phase. Touches layout; call it for every record BEFORE any apply(). */
 	function measure(rec) {
 		const e = rec.el;
-		return { l: e.offsetLeft, t: e.offsetTop, w: e.offsetWidth, h: e.offsetHeight };
+		const ecs = getComputedStyle(e);
+		const ez = parseInt(ecs.zIndex, 10);
+
+		if (rec.plane && rec.wrapper && rec.stageEl) {
+			const er = e.getBoundingClientRect();
+			const sr = rec.stageEl.getBoundingClientRect();
+			const sw = rec.stageEl.offsetWidth, sh = rec.stageEl.offsetHeight;
+			const sx = sw > 0 ? sr.width / sw : 1;
+			const sy = sh > 0 ? sr.height / sh : 1;
+			const wcs = getComputedStyle(rec.wrapper);
+			const wz = parseInt(wcs.zIndex, 10);
+			const z = !isNaN(wz) ? wz : (!isNaN(ez) ? ez : 0);
+			return {
+				l: (er.left - sr.left) / sx,
+				t: (er.top - sr.top) / sy,
+				w: er.width / sx,
+				h: er.height / sy,
+				z,
+				wz,
+				op: wcs.opacity,
+				vis: wcs.visibility,
+				disp: wcs.display
+			};
+		}
+
+		let z = !isNaN(ez) ? ez : 0;
+		if (rec.wrapper) {
+			const wz = parseInt(getComputedStyle(rec.wrapper).zIndex, 10);
+			if (!isNaN(wz)) z = wz;
+		}
+		return {
+			l: e.offsetLeft,
+			t: e.offsetTop,
+			w: e.offsetWidth,
+			h: e.offsetHeight,
+			z,
+			wz: NaN,
+			op: '',
+			vis: '',
+			disp: ''
+		};
 	}
 
-	/** WRITE phase. Writes styles only when the geometry really changed. */
-	function apply(rec, m) {
-		const p = rec.placed;
-		if (p && p.l === m.l && p.t === m.t && p.w === m.w && p.h === m.h) return;
-		const s = rec.layer.style;
-		s.left = m.l + 'px'; s.top = m.t + 'px';
-		s.width = m.w + 'px'; s.height = m.h + 'px';
-		
-		// Auditoría de geometría y radio asignado
-		/*
-		console.log('[ipax-backdrop:debug] apply geometry:', {
-			el: rec.el.className,
-			geometry: m,
-			computedRadius: getComputedStyle(rec.layer).borderRadius
+	function updatePlaneStacking(stageEl) {
+		const info = stages.get(stageEl);
+		if (!info || !info.plane) return;
+		let minZ = Infinity;
+		info.recs.forEach((r) => {
+			if (r.z < minZ) minZ = r.z;
 		});
-		*/
-		
-		rec.placed = m;
+		const nextZ = (isFinite(minZ) && minZ > 1) ? String(minZ - 1) : '';
+		if (info.plane.style.zIndex !== nextZ) info.plane.style.zIndex = nextZ;
+	}
+
+	/** WRITE phase. Writes styles only when the geometry or stacking really changed. */
+	function apply(rec, m) {
+		rec.m = m;
+		rec.z = m.z;
+		const x = rec.ext, l = m.l - x.l, t = m.t - x.t, w = m.w + x.l + x.r, h = m.h + x.t + x.b;
+		const zStr = rec.plane ? (isNaN(m.wz) ? '' : String(m.wz)) : '';
+		const opStr = rec.plane ? m.op : '';
+		const visStr = rec.plane ? m.vis : '';
+		const dispStr = rec.plane ? (m.disp === 'none' ? 'none' : '') : '';
+
+		const p = rec.placed;
+		if (
+			p &&
+			p.l === l && p.t === t && p.w === w && p.h === h &&
+			p.bl === x.l && p.bt === x.t && p.bw === m.w && p.bh === m.h &&
+			p.z === zStr && p.op === opStr && p.vis === visStr && p.disp === dispStr
+		) {
+			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
+			return;
+		}
+
+		const s = rec.layer.style;
+		s.left = l + 'px'; s.top = t + 'px';
+		s.width = w + 'px'; s.height = h + 'px';
+		if (rec.plane) {
+			if (s.zIndex !== zStr) s.zIndex = zStr;
+			if (s.opacity !== opStr) s.opacity = opStr;
+			if (s.visibility !== visStr) s.visibility = visStr;
+			if (s.display !== dispStr) s.display = dispStr;
+			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
+		}
+
+		const b = rec.bf.style; // the blur element covers the box only
+		b.left = x.l + 'px'; b.top = x.t + 'px';
+		b.width = m.w + 'px'; b.height = m.h + 'px';
+
+		rec.placed = { l, t, w, h, bl: x.l, bt: x.t, bw: m.w, bh: m.h, z: zStr, op: opStr, vis: visStr, disp: dispStr };
+	}
+
+	/** Change how far the layer grows beyond the box. Returns true if it changed (the layer rect must be re-read). */
+	function setExt(rec, ext) {
+		const x = rec.ext;
+		if (x.l === ext.l && x.t === ext.t && x.r === ext.r && x.b === ext.b) return false;
+		rec.ext = { l: ext.l, t: ext.t, r: ext.r, b: ext.b };
+		if (rec.m) apply(rec, rec.m);
+		return true;
 	}
 
 	function place(rec) { apply(rec, measure(rec)); }
 
 	function resetBlurStyle(rec) {
 		if (!rec.blurPx) return;
-		rec.cv.style.backdropFilter = '';
-		rec.cv.style.webkitBackdropFilter = '';
+		rec.bf.style.backdropFilter = '';
+		rec.bf.style.webkitBackdropFilter = '';
 		rec.blurPx = 0;
 	}
 
@@ -182,11 +522,11 @@
 		if (blurPx !== rec.blurPx) {
 			if (blurPx > 0) {
 				const b = 'blur(' + blurPx + 'px)';
-				rec.cv.style.backdropFilter = b;
-				rec.cv.style.webkitBackdropFilter = b;
+				rec.bf.style.backdropFilter = b;
+				rec.bf.style.webkitBackdropFilter = b;
 			} else {
-				rec.cv.style.backdropFilter = '';
-				rec.cv.style.webkitBackdropFilter = '';
+				rec.bf.style.backdropFilter = '';
+				rec.bf.style.webkitBackdropFilter = '';
 			}
 			rec.blurPx = blurPx;
 		}
@@ -205,12 +545,11 @@
 		rec.cv.width = 0; rec.cv.height = 0;
 		rec.est = null;
 		rec.blurCv = null;
+		rec.halo = null;
 		rec.ready = false;
 		rec.settled = false;
 		rec.lastW = 0; rec.lastH = 0;
-		rec.blurPx = 0;
-		rec.cv.style.backdropFilter = '';
-		rec.cv.style.webkitBackdropFilter = '';
+		resetBlurStyle(rec);
 	}
 
 	/** Release every record that is not in visibleSet and has been hidden longer than ttlMs. Returns how many. */
@@ -226,13 +565,13 @@
 	}
 
 	function withHitTesting(rec, fn) {
-		const st = rec.layer.style, prev = st.pointerEvents;
-		st.pointerEvents = 'auto';
-		try { return fn(); } finally { st.pointerEvents = prev; }
+		return fn();
 	}
 
 	window.j0.register('ipax-backdrop:compositor', {
-		ensureStyle, attach, detachAll, recordFor: (el) => records.get(el),
-		measure, apply, place, draw, clear, release, sweep, withHitTesting
+		ensureStyle, attach, detach, detachAll, pruneDisconnected, refreshOrder,
+		recordFor: (el) => records.get(el), ownerRecord, isWrapper, isStageOrAncestor,
+		recordsForTarget, layersBelow, isAbove,
+		measure, apply, setExt, place, draw, clear, release, sweep, withHitTesting
 	});
 })();

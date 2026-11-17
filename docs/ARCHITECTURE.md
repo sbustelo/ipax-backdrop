@@ -33,8 +33,8 @@ Four digits, in the spirit of BASIC line numbers: tens inside a group, hundreds 
 | 0010 | Foundation | `0010-nucleo` constants, limits, config, bus contracts |
 | 01xx | Utilities | `0100-util-color`, `0110-util-contrast` |
 | 02xx | Orchestrator | `0200-orquestador` |
-| 1xxx | Reader | `1000-lector` (CSS), `1100-lector-texto` (text colours) |
-| 2xxx | Resolver | `2000-resolutor`, `2100-resolutor-capas`, `2200-resolutor-geometria`, `2300-resolutor-desenfoque` (blur) |
+| 1xxx | Reader | `1000-lector` (CSS), `1100-lector-texto` (text colours and word glyph boxes) |
+| 2xxx | Resolver | `2000-resolutor`, `2100-resolutor-capas`, `2200-resolutor-geometria`, `2300-resolutor-desenfoque` (blur), `2400-resolutor-halo` (glyph contour mask) |
 | 3xxx | Kernel | `3000-kernel` contract and backend choice, `3100-kernel-cpu`, `3200-kernel-webgl`, `3210-kernel-webgl-shaders` |
 | 4xxx | Compositor | `4000-compositor` |
 | 9xxx | Public API | `9000-api` |
@@ -55,6 +55,7 @@ A new file takes the next free number inside its group. A new chapter takes the 
 | `layers` | 2100 | `layersOf`, `imageFor`, `beginFrame`, `endFrame` |
 | `css-geometry` | 2200 | `splitTop`, `parseLength`, `parseRepeat`, `backgroundGeometry`, `objectFitGeometry` |
 | `blur` | 2300 | `blur`, `boxRadius`, `factor` |
+| `halo` | 2400 | `reachOf`, `extent`, `mask`, `activeCells` |
 | `kernel` | 3000 | `render`, `activeBackend` |
 | `kernel-cpu` | 3100 | `available`, `render` |
 | `kernel-webgl` | 3200 | `available`, `render`, `disable`, `reason`, `reset` |
@@ -102,8 +103,8 @@ Margins: the output is 8 bits per channel, so solving exactly at the threshold w
 
 - **Visible set.** An `IntersectionObserver` (`rootMargin: 50px 0px`) keeps the set of records in or near the viewport. Only those are measured and recomputed.
 - **One layout per frame.** `runAll` runs in `requestAnimationFrame`: first every geometry read (`compositor.measure`), then every write (`compositor.apply`, skipped when nothing changed), then the `getBoundingClientRect` reads.
-- **Epochs.** `invalidate`, window resize, `refresh()` and font loads bump a global epoch. A record is clean when it is settled and its epoch is current; otherwise it is recomputed the next time it is visible, even if it was off-screen when the change happened. Image loads only reopen the records that were drawn while waiting for an image (`rec.waitImg`). A record settles once it has been computed fully in view; partly visible boxes stay unsettled. The `ResizeObserver` only reports real size changes, never its initial notification.
-- **Queue.** Dirty records are sorted by `z-index`, then by distance to the viewport centre, and processed until `config.frameBudgetMs` (12 ms) is used. The rest waits for the next frame.
+- **Epochs.** `invalidate`, window resize, `refresh()` and font loads bump a global epoch. A record is clean when it is settled and its epoch is current; otherwise it is recomputed the next time it is visible, even if it was off-screen when the change happened. Image loads reopen only the records that were drawn while waiting for an image (`rec.waitImg`) and reset their `renderedAt` timestamp to `0` so they are prioritized immediately once decoded. A record settles once it has been computed fully in view; partly visible boxes stay unsettled. The `ResizeObserver` only reports real size changes, never its initial notification.
+- **Queue.** Dirty records are scheduled in round-robin order by last render timestamp (`renderedAt`, with `z-index` and DOM order as tie-breakers) while preserving `z-index` / DOM order locally between overlapping records (`rectsOverlap`) so underlying layers are resolved first. Records are processed until `config.frameBudgetMs` (12 ms) is used, preventing starvation when continuous background animations invalidate more elements than fit in a single frame budget.
 - **Resolution.** For each element the working scale `s` is stretched between `minBudget` pixels and `min(maxPixelScale, devicePixelRatio)`, using two moving averages (fixed probing time and pixel throughput) and the frame time divided across the dirty records.
 - **Scrolling.** A partly visible box that already has a result for the current epoch is refreshed at most every `config.partialThrottleMs` (80 ms) while the page scrolls, followed by a 130 ms `scrollEndTimer` flush once scrolling stops so throttled records converge cleanly.
 - **Memory.** Every 2 s `compositor.sweep` frees the canvases of records that have been out of view longer than `config.releaseAfterMs` (4 s). A released record is unsettled, so it is recomputed when it returns.
@@ -111,7 +112,7 @@ Margins: the output is 8 bits per channel, so solving exactly at the threshold w
 ## Resolver notes
 
 - **Frame cache.** `runAll` wraps its loop in `layers.beginFrame()` / `endFrame()`. Inside it, the paint layers of non-managed elements and the inherited-risk chain (transform, filter, blend mode, backdrop-filter, opacity) of every ancestor are computed once and shared by all boxes. Managed elements are never cached, because their `'lay'` layer changes while the frame is processed. Per-resolve `WeakMap` caches also memoize `ownerRecord` and `position: fixed` ancestor lookups, ignoring fixed overlays above the element's `z-index`.
-- **Adaptive probing.** Base `cellSize` (12 px by default) scales smoothly up to `2 * cellSize` on large elements to avoid quadratic cell growth. When `config.probeBlock > 1` (4 by default), the resolver first samples a coarse 3x3 grid (up to 9 points across the active region); if all samples share the same layer stack, the entire grid is filled in $O(N)$. Otherwise, it subdivides into `probeBlock` x `probeBlock` blocks and tests the 4 shared block corners (reusing already-probed cells) before falling back to cell-by-cell probing. `probeBlock = 1` probes every cell.
+- **Adaptive probing.** Base `cellSize` (configured per element via `--ipax-backdrop-cellsize`, defaulting to `config.cellSize` = 12 px) scales smoothly up to `2 * cellSize` on large elements to avoid quadratic cell growth. When `config.probeBlock > 1` (4 by default), the resolver first samples a coarse 3x3 grid (up to 9 points across the active region); if all samples share the same layer stack, the entire grid is filled in $O(N)$. Otherwise, it subdivides into `probeBlock` x `probeBlock` blocks and tests the 4 shared block corners (reusing already-probed cells) before falling back to cell-by-cell probing. `probeBlock = 1` probes every cell.
 - **Painting.** Neighbouring cells with the same layer stack are painted as one rectangle and identical consecutive rows are merged. Edges are snapped to whole canvas pixels to avoid seams.
 - **Reuse.** The estimate canvas lives in `rec.est` and the blur output in `rec.blurCv`. Both are consumed synchronously by the kernel.
 - **Blur.** `blur` works on an image reduced by k = 1, 2, 4 or 8 (chosen so the reduced sigma stays at least 2 px), runs three box passes per axis with integer arithmetic, and scales the result back up with bilinear filtering.
@@ -164,4 +165,4 @@ Rule: **if you change one implementation, change the other and compare them.** M
 
 ---
 
-_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

@@ -1,8 +1,19 @@
 # Changelog
 
-# Changelog
+## 0.1.11 • 17/nov/2026
 
-## 0.1.10 • 17/nov/2026
+- **Starvation-Free Round-Robin Frame Scheduler (`0200-orquestador.js`):**
+  - Orders dirty records by last render timestamp (`renderedAt`) while preserving `z-index` and DOM paint order locally between overlapping boxes (`rectsOverlap`), preventing lower-order visible boxes from starving when continuous animations invalidate more elements than fit within `config.frameBudgetMs` (`12 ms`).
+  - Resets `renderedAt = 0` when `image-loaded` reopens records flagged with `rec.waitImg`, prioritizing freshly decoded high-resolution images on the next frame.
+- **Per-Element `--ipax-backdrop-cellsize` Wiring (`0200-orquestador.js`):**
+  - Uses each element's resolved `params.cellSize` (falling back to `config.cellSize`) when computing the adaptive DOM probe grid step, enabling independent probe granularity overrides via CSS custom properties.
+- **Performance Benchmark Suite (`examples/performance-longpage.php`, `examples/performance-motion.html`):**
+  - Renamed the existing 400-element stress test (`performance-test.php`) to `examples/performance-longpage.php`, introducing optional background panning and image swapping workloads.
+  - Adds a new benchmark (`examples/performance-motion.html`) testing simultaneous vs. isolated presets, text mutations, box motion, and CSS cross-fade desync behavior.
+  - Shared HUD telemetry, pan/swap timing, an extensible top-level benchmark selector, and a native `<dialog>` background image pool manager (`examples/js/performance-common.js`) supporting both generated textures and local user-uploaded images via zero-copy `blob:` URLs.
+
+
+## 0.1.10 • 16-17/nov/2026
 
 - **Decoupled Dual-Family CSS API (`--ipax-backdrop`, `--ipax-text`, `--ipax-mode`):**
   - Splits container contrast/blur (`--ipax-backdrop`) and glyph-contour contrast/blur (`--ipax-text`) into independent, composable CSS families with shorthand + longhand cascade support and a shared `--ipax-mode` (`default | tricontrast`) property.
@@ -159,4 +170,4 @@
 
 ---
 
-_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

@@ -623,7 +623,12 @@
 		if (imgTimer) clearTimeout(imgTimer);
 		imgTimer = setTimeout(() => {
 			imgTimer = null;
-			records.forEach((rec) => { if (rec.waitImg) rec.settled = false; });
+			records.forEach((rec) => {
+				if (rec.waitImg) {
+					rec.settled = false;
+					rec.renderedAt = 0;
+				}
+			});
 			schedule();
 		}, 50);
 	}
@@ -715,6 +720,24 @@
 		}
 
 		const dirty = entries.filter((item) => dirtySet.has(item.r));
+		if (dirty.length > 1) {
+			dirty.sort((a, b) => (a.r.renderedAt - b.r.renderedAt) || compareOrder(a, b));
+			for (let i = 1; i < dirty.length; i++) {
+				const cur = dirty[i];
+				let insertAt = i;
+				for (let j = 0; j < i; j++) {
+					const prev = dirty[j];
+					if (compareOrder(cur, prev) < 0 && rectsOverlap(cur.R, prev.R)) {
+						insertAt = j;
+						break;
+					}
+				}
+				if (insertAt < i) {
+					dirty.splice(i, 1);
+					dirty.splice(insertAt, 0, cur);
+				}
+			}
+		}
 		const activeCount = dirty.length;
 
 		const t0 = performance.now();
@@ -837,7 +860,7 @@
 
 		const w = Math.max(1, Math.ceil(R.width * s)), h = Math.max(1, Math.ceil(R.height * s));
 
-		const baseStep = Math.max(4, cfg.cellSize);
+		const baseStep = Math.max(4, params.cellSize || cfg.cellSize);
 		const viewportCells = Math.ceil(vw / baseStep) * Math.ceil(vh / baseStep);
 		const areaStep = Math.min(baseStep * 2, Math.round(Math.sqrt(area) / 22));
 		const localStep = Math.max(baseStep, areaStep, Math.ceil(Math.sqrt(area / viewportCells)));

@@ -43,6 +43,24 @@ Full syntax, longhands, TRBL cascade rules, APCA `Lc` fallback, and performance 
 WCAG was designed for flat colours. Over a picture, the background changes under every letter, so no single ratio holds. ipax-backdrop copies the pixels behind the text, moves their lightness (L in OKLab) just far enough to reach the requested ratio, and puts the result in a layer under the element. Where it cannot know what is underneath, it lays a translucent veil whose alpha guarantees the ratio against the worst possible backdrop.
 
 
+## Supported and unsupported backdrops
+
+The engine rebuilds the background behind an element from what it can read and redraw. Anything else is either covered with a veil or not seen at all.
+
+| Backdrop | Status | Behavior |
+|---|---|---|
+| Images (`background-image`, `<img>`), including moving ones | Supported | Redrawn and corrected. |
+| Flat colors, including translucent (`rgba()`) | Supported | Redrawn and corrected. |
+| CSS gradients | Veiled | Marked as unknown. A translucent veil guarantees the ratio against the worst possible backdrop. |
+| CSS-transformed elements (rotated, etc.) | Veiled | Marked as unknown. Same veil. |
+| Animated GIF | Unsupported | As tested, only the first frame is shown, static and flattened without transparency. Same result as `<img>` and as `background-image`. |
+| `<video>` | Unsupported | Not marked as unknown. It is ignored and the engine renders whatever is behind it. |
+
+`examples/index.html` shows the supported cases (movable pictures, flat and translucent colors) and the veiled ones (gradient, rotated box).
+
+GIF and video support is not planned for this version. Detecting them to apply a veil, or sampling every N frames, are possible future improvements.
+
+
 ## Online example
 
 The example is published at the IPAX Project website:
@@ -58,10 +76,11 @@ If you only want a directional, gradual blur without lightness adaptation, set `
 
 ## Performance
 
-Each managed element is recomputed only when something changed, and only while it is in or near the viewport. The work per frame is capped by a time budget (`config.frameBudgetMs`), the working resolution adapts to the target frame rate (`--ipax-backdrop-performance`), and DOM probing uses a two-level coarse-to-fine strategy (`3×3` grid pre-pass + `config.probeBlock` shared-corner blocks). The keys are in [docs/CSS-API.md](docs/CSS-API.md) and the scheduling is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Each managed element is recomputed only when something changed, and only while it is in or near the viewport. The work per frame is capped by a time budget (`config.frameBudgetMs`) with round-robin turn scheduling (`renderedAt`) to prevent starvation under continuous motion, the working resolution adapts to the target frame rate (`--ipax-backdrop-performance`), and DOM probing uses a two-level coarse-to-fine strategy (`3×3` grid pre-pass + `config.probeBlock` shared-corner blocks). The keys are in [docs/CSS-API.md](docs/CSS-API.md) and the scheduling is described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-`examples/performance-test.php` renders 400 boxes over 16 generated backgrounds with a live HUD, to stress the engine on your own hardware.
-
+Two interactive benchmarks are included in `examples/` (both sharing `examples/js/performance-common.js` and a custom background pool modal for generated or local images):
+- `examples/performance-longpage.php`: renders 400 boxes across a long-scroll bento grid with live contrast/blur sliders, viewport culling counters, and optional background motion (`150%` pan) and image swapping.
+- `examples/performance-motion.html`: tests `--ipax-backdrop` and `--ipax-text` under continuous text mutations, background swaps/panning (including CSS transition desync inspection), box motion/overlap, and side-by-side or isolated performance presets (`High Quality`, `Balanced`, `Fast`, `CPU Fallback`).
 
 ## Documentation
 
@@ -76,7 +95,7 @@ Each managed element is recomputed only when something changed, and only while i
 dist/            single-file version of the script (contains all from lib/ and src/)
 lib/j0-kernel/   bus and registry (kernel of the j0 framework)
 src/             the library, one IIFE per file, loaded by ascending numeric prefix
-examples/        sample pages: draggable boxes, the editor and the stress test (HTML, CSS and JS in separate files)
+examples/        sample pages: draggable boxes, the editor and performance benchmarks (HTML, CSS and JS in separate files)
 tooling/         build script (concatenates and minifies lib/ and src/ into dist/)
 tests/           unit and CPU/GPU parity tests 
 docs/            documentation
@@ -85,7 +104,7 @@ docs/            documentation
 
 ## Status
 
-Version `0.1.10`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
+Version `0.1.11`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
 
 ## License
 
@@ -102,4 +121,4 @@ Entirely optional, never required.
 
 ---
 
-_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

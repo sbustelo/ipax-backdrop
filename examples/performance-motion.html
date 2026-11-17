@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<title>ipax-backdrop &amp; ipax-text: Motion &amp; Dynamic Presets Benchmark</title>
+	<link rel="stylesheet" href="css/performance-motion.css">
+</head>
+<body>
+	<header class="dyn-hud">
+		<div class="dyn-hud-metrics">
+			<div data-perf-nav="host"></div>
+			<div class="dyn-stat">rAF FPS: <strong data-dyn-role="raf-fps">0</strong></div>
+			<div class="dyn-stat">Frame: <strong data-dyn-role="raf-ms">0.0</strong> ms</div>
+			<div class="dyn-stat">Avg render: <strong data-dyn-role="render-ms">0.0</strong> ms</div>
+			<div class="dyn-stat">Engine: <strong data-dyn-role="backend">init</strong></div>
+		</div>
+
+		<div class="dyn-hud-actions">
+			<label class="dyn-switch-label">
+				<span>Show effect</span>
+				<input type="checkbox" class="dyn-switch" data-dyn-control="effect" checked>
+			</label>
+			<button type="button" class="dyn-btn" data-dyn-action="step-once">Step Workload</button>
+			<button type="button" class="dyn-btn" data-dyn-action="reset-layout">Reset Positions</button>
+		</div>
+	</header>
+
+	<main class="dyn-layout">
+		<aside class="dyn-sidebar">
+			<section class="dyn-panel">
+				<h2 class="dyn-panel-title">Evaluation Mode</h2>
+				<div class="dyn-segmented" role="group" aria-label="Evaluation mode">
+					<button type="button" class="dyn-seg-btn is-active" data-dyn-mode="comparative">Comparative (4 Presets)</button>
+					<button type="button" class="dyn-seg-btn" data-dyn-mode="isolated">Isolated (Single Preset)</button>
+				</div>
+				<p class="dyn-help" data-dyn-role="mode-hint">
+					Runs 4 boxes side-by-side, each bound to its own preset via CSS custom properties.
+				</p>
+
+				<div class="dyn-isolated-box" data-dyn-role="isolated-controls" hidden>
+					<label class="dyn-field">
+						<span>Active Preset</span>
+						<select class="dyn-select" data-dyn-control="isolated-preset">
+							<option value="high">High Quality (0 FPS, 8px cell, 2x)</option>
+							<option value="balanced" selected>Balanced (60 FPS, 12px cell, 2x)</option>
+							<option value="fast">Fast (120 FPS, 24px cell, 1x)</option>
+							<option value="cpu">CPU Fallback (30 FPS, 24px cell, 1x)</option>
+							<option value="custom">Custom Parameters</option>
+						</select>
+					</label>
+
+					<div class="dyn-custom-grid" data-dyn-role="custom-params">
+						<label class="dyn-field">
+							<span>Backend</span>
+							<select class="dyn-select" data-dyn-control="cfg-backend">
+								<option value="auto">auto (WebGL)</option>
+								<option value="webgl">webgl</option>
+								<option value="cpu">cpu</option>
+							</select>
+						</label>
+						<label class="dyn-field">
+							<span>Target FPS (0 = max)</span>
+							<input type="number" class="dyn-input" min="0" max="240" step="10" value="60" data-dyn-control="cfg-fps">
+						</label>
+						<label class="dyn-field">
+							<span>Min Pixel Budget</span>
+							<input type="number" class="dyn-input" min="1" max="524288" step="4096" value="65536" data-dyn-control="cfg-budget">
+						</label>
+						<label class="dyn-field">
+							<span>Probe Cell Size (px)</span>
+							<input type="number" class="dyn-input" min="4" max="64" step="2" value="12" data-dyn-control="cfg-cellsize">
+						</label>
+						<label class="dyn-field">
+							<span>Max Pixel Scale</span>
+							<input type="number" class="dyn-input" min="0.5" max="3" step="0.25" value="2" data-dyn-control="cfg-scale">
+						</label>
+					</div>
+				</div>
+			</section>
+
+			<section class="dyn-panel">
+				<h2 class="dyn-panel-title">Dynamic Stress Workloads</h2>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="wl-text">
+						<span>Text Mutations (DOM + Halo)</span>
+					</label>
+					<select class="dyn-select dyn-select-compact" data-dyn-control="wl-text-rate">
+						<option value="450">450 ms</option>
+						<option value="1000">1000 ms</option>
+						<option value="2500" selected>2500 ms</option>
+						<option value="5000">5000 ms</option>
+						<option value="frame">Every frame</option>
+					</select>
+				</div>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="wl-bg" checked>
+						<span>Background Image Swap</span>
+					</label>
+					<select class="dyn-select dyn-select-compact" data-dyn-control="wl-bg-rate">
+						<option value="1500">1500 ms</option>
+						<option value="3000">3000 ms</option>
+						<option value="5000" selected>5000 ms</option>
+						<option value="8000">8000 ms</option>
+					</select>
+				</div>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-field">
+						<span>CSS Cross-Fade <small>(Desyncs engine)</small></span>
+					</label>
+					<select class="dyn-select dyn-select-compact" data-dyn-control="wl-bg-fade">
+						<option value="0">0 ms (Off)</option>
+						<option value="250">250 ms</option>
+						<option value="500" selected>500 ms</option>
+						<option value="1500">1500 ms</option>
+						<option value="2000">2000 ms</option>
+					</select>
+				</div>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="wl-bg-pan" checked>
+						<span>Continuous Background Pan</span>
+					</label>
+					<button type="button" class="dyn-btn dyn-btn-accent" data-perf-action="open-bg-modal">🖼️ Backgrounds (10)</button>
+				</div>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="wl-anim">
+						<span>Box Motion &amp; Overlap</span>
+					</label>
+					<select class="dyn-select dyn-select-compact" data-dyn-control="wl-anim-pattern">
+						<option value="orbit" selected>Orbit</option>
+						<option value="cross">Z-Overlap</option>
+						<option value="pulse">Size Pulse</option>
+					</select>
+				</div>
+
+				<label class="dyn-field">
+					<span>Animation Speed: <strong data-dyn-role="speed-label">0.25x</strong></span>
+					<input type="range" class="dyn-range" min="0.10" max="1.5" step="0.05" value="0.25" data-dyn-control="wl-anim-speed">
+				</label>
+			</section>
+
+			<section class="dyn-panel">
+				<h2 class="dyn-panel-title">Backdrop &amp; Text Pipeline</h2>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="fx-box" checked>
+						<span>Enable <code>--ipax-backdrop</code></span>
+					</label>
+				</div>
+
+				<div class="dyn-workload-row">
+					<label class="dyn-check">
+						<input type="checkbox" data-dyn-control="fx-text" checked>
+						<span>Enable <code>--ipax-text</code></span>
+					</label>
+				</div>
+
+				<label class="dyn-field">
+					<span>Solver Mode (<code>--ipax-mode</code>)</span>
+					<select class="dyn-select" data-dyn-control="fx-mode">
+						<option value="case" selected>Per-box showcase</option>
+						<option value="default">Force default (OKLab adaptive)</option>
+						<option value="tricontrast">Force tricontrast (dual band)</option>
+					</select>
+				</label>
+			</section>
+		</aside>
+
+		<section class="dyn-stage-wrap">
+			<div class="dyn-stage" data-dyn-role="stage">
+				<div class="dyn-stage-bg" data-dyn-role="stage-bg-1"></div>
+				<div class="dyn-stage-bg" data-dyn-role="stage-bg-2"></div>
+
+				<article class="dyn-box" data-dyn-box="0" data-dyn-slot="0" data-dyn-case="0" data-ipax-backdrop data-ipax-text>
+					<header class="dyn-box-head">
+						<select class="dyn-box-preset" data-dyn-box-preset="0" aria-label="Box 1 preset">
+							<option value="high" selected>High Quality</option>
+							<option value="balanced">Balanced</option>
+							<option value="fast">Fast</option>
+							<option value="cpu">CPU Fallback</option>
+						</select>
+						<span class="dyn-box-spec">Box 4.5:1 + Text 7:1</span>
+						<span class="dyn-badge" data-dyn-box-backend="0">WAIT</span>
+					</header>
+					<h3 class="dyn-box-title" data-dyn-box-title="0">Editorial Card Overlay</h3>
+					<p class="dyn-box-copy" data-dyn-box-copy="0">
+						Combines container contrast with <span class="dyn-accent">7:1 glyph halos</span> for multi-color body copy.
+					</p>
+					<footer class="dyn-box-telemetry" data-dyn-box-stats="0">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
+				</article>
+
+				<article class="dyn-box" data-dyn-box="1" data-dyn-slot="1" data-dyn-case="1" data-ipax-backdrop data-ipax-text>
+					<header class="dyn-box-head">
+						<select class="dyn-box-preset" data-dyn-box-preset="1" aria-label="Box 2 preset">
+							<option value="high">High Quality</option>
+							<option value="balanced" selected>Balanced</option>
+							<option value="fast">Fast</option>
+							<option value="cpu">CPU Fallback</option>
+						</select>
+						<span class="dyn-box-spec">Text-only 7:1 (No box)</span>
+						<span class="dyn-badge" data-dyn-box-backend="1">WAIT</span>
+					</header>
+					<h3 class="dyn-box-title" data-dyn-box-title="1">Standalone Photo Headline</h3>
+					<p class="dyn-box-copy" data-dyn-box-copy="1">
+						Protects individual letterforms directly over imagery with <span class="dyn-accent">zero container veil</span>.
+					</p>
+					<footer class="dyn-box-telemetry" data-dyn-box-stats="1">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
+				</article>
+
+				<article class="dyn-box" data-dyn-box="2" data-dyn-slot="2" data-dyn-case="2" data-ipax-backdrop data-ipax-text>
+					<header class="dyn-box-head">
+						<select class="dyn-box-preset" data-dyn-box-preset="2" aria-label="Box 3 preset">
+							<option value="high">High Quality</option>
+							<option value="balanced">Balanced</option>
+							<option value="fast" selected>Fast</option>
+							<option value="cpu">CPU Fallback</option>
+						</select>
+						<span class="dyn-box-spec">Tricontrast 4.5:1</span>
+						<span class="dyn-badge" data-dyn-box-backend="2">WAIT</span>
+					</header>
+					<h3 class="dyn-box-title" data-dyn-box-title="2">White Title + Dark Copy</h3>
+					<p class="dyn-box-copy" data-dyn-box-copy="2">
+						Dual-polarity solver clamps the backdrop so light and dark text share 4.5:1 simultaneously.
+					</p>
+					<footer class="dyn-box-telemetry" data-dyn-box-stats="2">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
+				</article>
+
+				<article class="dyn-box" data-dyn-box="3" data-dyn-slot="3" data-dyn-case="3" data-ipax-backdrop data-ipax-text>
+					<header class="dyn-box-head">
+						<select class="dyn-box-preset" data-dyn-box-preset="3" aria-label="Box 4 preset">
+							<option value="high">High Quality</option>
+							<option value="balanced">Balanced</option>
+							<option value="fast">Fast</option>
+							<option value="cpu" selected>CPU Fallback</option>
+						</select>
+						<span class="dyn-box-spec">Bypass blur + Text 7:1</span>
+						<span class="dyn-badge" data-dyn-box-backend="3">WAIT</span>
+					</header>
+					<h3 class="dyn-box-title" data-dyn-box-title="3">Frosted Blur + Glyph Solver</h3>
+					<p class="dyn-box-copy" data-dyn-box-copy="3">
+						Container runs pure spatial blur while <span class="dyn-accent">OKLab text solver</span> locks 7:1 contrast.
+					</p>
+					<footer class="dyn-box-telemetry" data-dyn-box-stats="3">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
+				</article>
+			</div>
+		</section>
+	</main>
+
+	<dialog class="perf-modal" data-perf-modal="bg">
+		<div class="perf-modal-card">
+			<header class="perf-modal-head">
+				<h2 class="perf-modal-title">Background Image Pool</h2>
+				<button type="button" class="perf-modal-close" data-perf-action="pool-close" aria-label="Close">&times;</button>
+			</header>
+			<div class="perf-modal-toolbar">
+				<button type="button" class="perf-modal-btn" data-perf-action="pool-random">🎲 Generate Random</button>
+				<label class="perf-modal-btn perf-modal-btn-primary perf-modal-upload">
+					<span>📁 Load Local Images&hellip;</span>
+					<input type="file" accept="image/*" multiple data-perf-control="pool-files">
+				</label>
+				<span class="perf-modal-meta" data-perf-role="pool-summary">0 images</span>
+			</div>
+			<div class="perf-modal-drop" data-perf-role="pool-drop">
+				Drop image files here or use <strong>📁 Load Local Images</strong> to test real photography.
+			</div>
+			<div class="perf-modal-grid" data-perf-role="pool-grid"></div>
+		</div>
+	</dialog>
+
+	<script src="../dist/ipax-backdrop.min.js"></script>
+	<script src="js/editor-presets.js"></script>
+	<script src="js/example-images.js"></script>
+	<script src="js/performance-common.js"></script>
+	<script src="js/performance-motion.js"></script>
+</body>
+</html>

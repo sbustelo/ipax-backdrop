@@ -71,4 +71,4 @@ const customUrl = ExampleImages.generate(640, 480, ['#00364C', '#006277', '#8E51
 
 ---
 
-_IPAX Backdrop v0.1.10 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

@@ -681,7 +681,7 @@
 			const zChanged = geo[i].z !== rec.z;
 
 			rec.z = geo[i].z;
-			const item = { r: rec, R, fullyInView, z: rec.z, domOrder: rec.domOrder };
+			const item = { r: rec, R, fullyInView, z: rec.z, domOrder: rec.domOrder, zChanged };
 			entries.push(item);
 
 			const isDirty = !clean(rec) || sizeChanged || posChanged || zChanged;
@@ -715,6 +715,16 @@
 				if (rectsOverlap(rOld, upper.R) || rectsOverlap(rNew, upper.R)) {
 					upper.r.settled = false;
 					dirtySet.add(upper.r);
+				}
+			}
+			if (src.zChanged) {
+				for (let j = 0; j < i; j++) {
+					const lower = entries[j];
+					if (dirtySet.has(lower.r)) continue;
+					if (rectsOverlap(rOld, lower.R) || rectsOverlap(rNew, lower.R)) {
+						lower.r.settled = false;
+						dirtySet.add(lower.r);
+					}
 				}
 			}
 		}
@@ -1618,7 +1628,6 @@
 		// Already-computed managed layers strictly below this record (sorted bottom-to-top).
 		const below = Comp.layersBelow ? Comp.layersBelow(rec, R) : [];
 		const selfRoot = rec.wrapper || rec.el;
-		const stageRoot = rec.plane ? rec.plane.parentElement : null;
 		const hostParent = selfRoot.parentElement;
 		const ownerOf = (e) => {
 			if (!Comp.ownerRecord) return null;
@@ -1639,9 +1648,9 @@
 			if (!e || e.nodeType !== 1) return 0;
 			let v = zCache.get(e);
 			if (v !== undefined) return v;
-			if (stageRoot && e !== stageRoot && stageRoot.contains(e)) {
+			if (hostParent && e !== hostParent && hostParent.contains(e)) {
 				let cur = e;
-				while (cur && cur.parentElement !== stageRoot) cur = cur.parentElement;
+				while (cur && cur.parentElement !== hostParent) cur = cur.parentElement;
 				if (cur) {
 					const z = parseInt(getComputedStyle(cur).zIndex, 10);
 					v = isNaN(z) ? 0 : z;
@@ -1678,7 +1687,7 @@
 			const flushBelowAbove = (minZ) => {
 				while (bi >= 0 && !cut) {
 					const BL = below[bi];
-					if (minZ !== null && BL.z < minZ) break;
+					if (minZ !== null && BL.z <= minZ) break;
 					bi--;
 					if (!covers(BL, px, py)) continue;
 					stack.push(BL);
@@ -1699,14 +1708,13 @@
 					const owner = ownerOf(e);
 					if (owner && owner !== rec) {
 						if (Comp.isAbove && Comp.isAbove(owner, rec)) continue;
-						// Managed elements sit above the layer plane; their corrected canvas is merged via `below`.
-						if (e === owner.el || owner.el.contains(e)) continue;
+						// Child content inside a lower managed element is skipped; its own background and corrected canvas still compose.
+						if (owner.el.contains(e) && e !== owner.el) continue;
 					}
 
 					const ez = elemZ(e);
 					if (isFixed(e) && ez > rec.z) continue;
-					if (stageRoot && stageRoot.contains(e) && e !== stageRoot && ez > rec.z) continue;
-					if (!stageRoot && hostParent && hostParent.contains(e) && e !== hostParent) {
+					if (hostParent && hostParent.contains(e) && e !== hostParent) {
 						let sib = e;
 						while (sib && sib.parentElement !== hostParent) sib = sib.parentElement;
 						if (sib && sib !== selfRoot && sib.tagName !== layerTag) {
@@ -2028,7 +2036,9 @@
 		const scanPointerNone = (root) => {
 			for (let d = root.firstElementChild; d; d = d.nextElementSibling) {
 				if (d.tagName === layerTag || d.tagName === planeTag) continue;
-				if (Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d))) continue;
+				if (selfRec && (d === selfRec.el || d === selfRec.wrapper)) continue;
+				const dRec = Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d) ? Comp.ownerRecord(d) : null);
+				if (dRec && selfRec && Comp.isAbove && Comp.isAbove(dRec, selfRec)) continue;
 				const cs = getComputedStyle(d);
 				if (cs.display === 'none' || parseFloat(cs.opacity) <= 0) continue;
 				scanPointerNone(d);
@@ -3173,11 +3183,11 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
  *     author z-index overrides, own background, gradients, ::before/::after and text-shadow.
  *
  *   Level 2 (Managed elements enclosed in stacking-context wrappers, e.g. .ed-box[z-index]):
- *     When a common container holds 2 or more managed elements inside stacking-context wrappers,
- *     all <ipax-backdrop-layer> nodes are projected into an isolated <ipax-backdrop-plane>
- *     inserted in the common container immediately before the first wrapper (above background
- *     elements such as .ed-stage-bg and below all wrappers), ordered internally by each
- *     wrapper's effective z-index and mirroring wrapper opacity / visibility / display.
+ *     When a managed element sits inside a private stacking-context wrapper, its
+ *     <ipax-backdrop-layer> is placed in the wrapper's parent container immediately before
+ *     the wrapper (above background elements and any sibling with a lower z-index, and
+ *     immediately behind its own wrapper at the same stack level), mirroring wrapper
+ *     z-index / opacity / visibility / display.
  *
  * The CSS blur fallback (backdrop-filter, used where the backdrop is unknown) lives on
  * <div data-ipax-backdrop-bf>, which always covers the BOX only, so a halo that goes
@@ -3198,8 +3208,8 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
  * Service 'ipax-backdrop:compositor':
  *   ensureStyle()                    inject the internal stylesheet (idempotent)
  *   attach(el) -> rec                create the layer {el, layer, cv, bf, id, ready, ext, ...}
- *   detach(el)                       remove one layer and clean up its stage plane if needed
- *   detachAll()                      remove every layer, plane and observer
+ *   detach(el)                       remove one layer
+ *   detachAll()                      remove every layer and observer
  *   pruneDisconnected() -> rec[]     detach records whose elements were removed from DOM
  *   refreshOrder()                   recompute DOM paint order across all active records
  *   recordFor(el) -> rec | undefined
@@ -3224,15 +3234,9 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	if (!window.j0 || !window.j0.register) return;
 
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
-	const PLANE_TAG = 'ipax-backdrop-plane';
 	const records = new Map();
 	const wrapperToRec = new Map();
-	const stages = new Map(); // stageEl -> { el, plane, recs: Set<rec>, minZ }
 	let nextId = 0, observer = null, styleEl = null;
-
-	function planeTagName() {
-		return svc('names').planeTag || PLANE_TAG;
-	}
 
 	/**
 	 * INTERNAL STYLESHEET (the only CSS this library injects).
@@ -3240,17 +3244,14 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	 *   rule 2  the layer is an absolutely positioned, click-through box at z-index 0
 	 *   rule 3  the blur element is an absolutely positioned box (covers the element box)
 	 *   rule 4  the canvas sits above the blur fallback element and fills the layer
-	 *   rule 5  the shared stage plane isolates layer z-indices below all wrappers
 	 */
 	function cssText() {
 		const N = svc('names');
-		const pTag = planeTagName();
 		return [
 			':where([' + N.managedAttr + ']){position:relative;z-index:1}',
 			N.layerTag + '{position:absolute;display:block;pointer-events:none;margin:0;padding:0;z-index:0}',
 			N.layerTag + '>[data-ipax-backdrop-bf]{position:absolute;display:block;pointer-events:none;margin:0;padding:0;border-radius:inherit}',
-			N.layerTag + '>canvas{position:relative;display:block;width:100%;height:100%}',
-			pTag + '{position:absolute;inset:0;display:block;pointer-events:none;margin:0;padding:0;isolation:isolate}'
+			N.layerTag + '>canvas{position:relative;display:block;width:100%;height:100%}'
 		].join('\n');
 	}
 
@@ -3290,70 +3291,26 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		return wrapper;
 	}
 
-	function insertLayerSibling(rec) {
-		if (rec.layer.parentNode !== rec.el.parentNode || rec.layer.nextSibling !== rec.el) {
+	function placeLayer(rec) {
+		if (rec.wrapper && rec.stageEl && rec.stageEl.isConnected) {
+			if (rec.layer.parentNode !== rec.stageEl || rec.layer.nextSibling !== rec.wrapper) {
+				rec.stageEl.insertBefore(rec.layer, rec.wrapper);
+			}
+			return;
+		}
+		if (rec.el.parentNode && (rec.layer.parentNode !== rec.el.parentNode || rec.layer.nextSibling !== rec.el)) {
 			rec.el.parentNode.insertBefore(rec.layer, rec.el);
 		}
 		rec.layer.style.zIndex = '';
 		rec.layer.style.opacity = '';
 		rec.layer.style.visibility = '';
 		rec.layer.style.display = '';
-		rec.plane = null;
-		rec.placed = null;
-	}
-
-	function syncStagePlane(stageEl) {
-		const info = stages.get(stageEl);
-		if (!info) return;
-
-		if (info.recs.size >= 2 && stageEl.isConnected) {
-			if (!info.plane) {
-				info.plane = document.createElement(planeTagName());
-				info.plane.setAttribute('aria-hidden', 'true');
-			}
-			// Insert immediately before the first wrapper in DOM order so background elements
-			// prior to the boxes (e.g. .ed-stage-bg) stay underneath the layer plane.
-			let firstWrapper = null;
-			for (let child = stageEl.firstElementChild; child; child = child.nextElementSibling) {
-				if (wrapperToRec.has(child) && info.recs.has(wrapperToRec.get(child))) {
-					firstWrapper = child;
-					break;
-				}
-			}
-			if (firstWrapper) {
-				if (info.plane.parentNode !== stageEl || info.plane.nextSibling !== firstWrapper) {
-					stageEl.insertBefore(info.plane, firstWrapper);
-				}
-			} else if (info.plane.parentNode !== stageEl) {
-				stageEl.appendChild(info.plane);
-			}
-
-			info.recs.forEach((r) => {
-				if (r.layer.parentNode !== info.plane) {
-					info.plane.appendChild(r.layer);
-					r.plane = info.plane;
-					r.placed = null;
-					r.settled = false;
-				}
-			});
-		} else {
-			if (info.plane) {
-				info.plane.remove();
-				info.plane = null;
-			}
-			info.recs.forEach((r) => {
-				if (r.plane !== null) {
-					insertLayerSibling(r);
-					r.settled = false;
-				}
-			});
-			if (info.recs.size === 0) stages.delete(stageEl);
-		}
 	}
 
 	// A ResizeObserver always delivers one notification right after observe(). Treating it as a resize
 	// invalidated every record at startup and made the first pass run twice. Only real size changes count.
 	const roSizes = new WeakMap();
+
 	function observeTarget(target) {
 		if (!target || typeof ResizeObserver === 'undefined') return;
 		if (!observer) {
@@ -3391,31 +3348,22 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 			if (w && st) {
 				wrapperToRec.set(w, targetRec);
 				observeTarget(w);
-				let info = stages.get(st);
-				if (!info) {
-					info = { el: st, plane: null, recs: new Set(), minZ: Infinity };
-					stages.set(st, info);
-					observeTarget(st);
-				}
-				info.recs.add(targetRec);
-				syncStagePlane(st);
+				observeTarget(st);
 			}
+			placeLayer(targetRec);
 		};
 
 		// If an earlier sibling claimed an ancestor of `el` as its private wrapper before `el` was marked,
-		// release that stale wrapper binding so both elements group under the shared stage plane.
+		// release that stale wrapper binding so both elements resolve against their actual stacking wrappers.
 		const displaced = [];
 		for (let anc = el.parentElement; anc && anc !== document.body && anc !== document.documentElement; anc = anc.parentElement) {
 			const prevRec = wrapperToRec.get(anc);
 			if (prevRec && prevRec.el !== el) {
 				wrapperToRec.delete(anc);
-				if (prevRec.stageEl && stages.has(prevRec.stageEl)) {
-					const oldInfo = stages.get(prevRec.stageEl);
-					oldInfo.recs.delete(prevRec);
-					syncStagePlane(prevRec.stageEl);
-				}
 				prevRec.wrapper = null;
 				prevRec.stageEl = null;
+				prevRec.placed = null;
+				prevRec.settled = false;
 				displaced.push(prevRec);
 			}
 		}
@@ -3424,7 +3372,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 			el, layer, cv, bf, id: ++nextId, ready: false, placed: null, m: null,
 			ext: { l: 0, t: 0, r: 0, b: 0 }, blurPx: 0, hiddenAt: 0,
 			est: null, blurCv: null, halo: null,
-			wrapper: null, stageEl: null, plane: null, z: 0, domOrder: 0
+			wrapper: null, stageEl: null, z: 0, domOrder: 0
 		};
 		records.set(el, rec);
 		observeTarget(el);
@@ -3444,11 +3392,6 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		rec.el.removeAttribute(N.managedAttr);
 		records.delete(el);
 		if (rec.wrapper) wrapperToRec.delete(rec.wrapper);
-		if (rec.stageEl && stages.has(rec.stageEl)) {
-			const info = stages.get(rec.stageEl);
-			info.recs.delete(rec);
-			syncStagePlane(rec.stageEl);
-		}
 	}
 
 	function pruneDisconnected() {
@@ -3463,10 +3406,8 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	function detachAll() {
 		const N = svc('names');
 		records.forEach((rec) => { rec.layer.remove(); rec.el.removeAttribute(N.managedAttr); });
-		stages.forEach((info) => { if (info.plane) info.plane.remove(); });
 		records.clear();
 		wrapperToRec.clear();
-		stages.clear();
 		if (observer) { observer.disconnect(); observer = null; }
 	}
 
@@ -3496,9 +3437,9 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 
 	function isStageOrAncestor(el) {
 		if (!el || el.nodeType !== 1) return false;
-		if (stages.has(el)) return true;
-		for (const st of stages.keys()) {
-			if (el.contains(st)) return true;
+		for (const rec of records.values()) {
+			const st = rec.stageEl;
+			if (st && (st === el || el.contains(st))) return true;
 		}
 		return false;
 	}
@@ -3507,7 +3448,6 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		if (!target || target.nodeType !== 1) return [];
 		const direct = records.get(target) || wrapperToRec.get(target);
 		if (direct) return [direct];
-		if (stages.has(target)) return Array.from(stages.get(target).recs);
 		const N = svc('names');
 		const host = target.closest && target.closest('[' + N.managedAttr + ']');
 		if (host && records.has(host)) return [records.get(host)];
@@ -3527,7 +3467,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		const out = [];
 		records.forEach((other) => {
 			if (other === rec || !other.ready || other.cv.width <= 0 || other.cv.height <= 0) return;
-			if (other.plane !== rec.plane) return;
+			if (other.layer.parentNode !== rec.layer.parentNode) return;
 			if (other.z > rec.z || (other.z === rec.z && other.domOrder >= rec.domOrder)) return;
 			const or = other.layer.getBoundingClientRect();
 			if (or.width <= 0 || or.height <= 0) return;
@@ -3550,21 +3490,21 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	/** READ phase. Touches layout; call it for every record BEFORE any apply(). */
 	function measure(rec) {
 		const e = rec.el;
-		const ecs = getComputedStyle(e);
-		const ez = parseInt(ecs.zIndex, 10);
 
-		if (rec.plane && rec.wrapper && rec.stageEl) {
+		if (rec.wrapper && rec.stageEl) {
 			const er = e.getBoundingClientRect();
 			const sr = rec.stageEl.getBoundingClientRect();
 			const sw = rec.stageEl.offsetWidth, sh = rec.stageEl.offsetHeight;
 			const sx = sw > 0 ? sr.width / sw : 1;
 			const sy = sh > 0 ? sr.height / sh : 1;
+			const padL = rec.stageEl.clientLeft * sx;
+			const padT = rec.stageEl.clientTop * sy;
 			const wcs = getComputedStyle(rec.wrapper);
 			const wz = parseInt(wcs.zIndex, 10);
-			const z = !isNaN(wz) ? wz : (!isNaN(ez) ? ez : 0);
+			const z = !isNaN(wz) ? wz : 0;
 			return {
-				l: (er.left - sr.left) / sx,
-				t: (er.top - sr.top) / sy,
+				l: (er.left - sr.left - padL) / sx,
+				t: (er.top - sr.top - padT) / sy,
 				w: er.width / sx,
 				h: er.height / sy,
 				z,
@@ -3575,17 +3515,14 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 			};
 		}
 
-		let z = !isNaN(ez) ? ez : 0;
-		if (rec.wrapper) {
-			const wz = parseInt(getComputedStyle(rec.wrapper).zIndex, 10);
-			if (!isNaN(wz)) z = wz;
-		}
+		const ecs = getComputedStyle(e);
+		const ez = parseInt(ecs.zIndex, 10);
 		return {
 			l: e.offsetLeft,
 			t: e.offsetTop,
 			w: e.offsetWidth,
 			h: e.offsetHeight,
-			z,
+			z: !isNaN(ez) ? ez : 0,
 			wz: NaN,
 			op: '',
 			vis: '',
@@ -3593,26 +3530,18 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 		};
 	}
 
-	function updatePlaneStacking(stageEl) {
-		const info = stages.get(stageEl);
-		if (!info || !info.plane) return;
-		let minZ = Infinity;
-		info.recs.forEach((r) => {
-			if (r.z < minZ) minZ = r.z;
-		});
-		const nextZ = (isFinite(minZ) && minZ > 1) ? String(minZ - 1) : '';
-		if (info.plane.style.zIndex !== nextZ) info.plane.style.zIndex = nextZ;
-	}
-
 	/** WRITE phase. Writes styles only when the geometry or stacking really changed. */
 	function apply(rec, m) {
 		rec.m = m;
 		rec.z = m.z;
+		placeLayer(rec);
+
+		const isWrapped = !!(rec.wrapper && rec.stageEl);
 		const x = rec.ext, l = m.l - x.l, t = m.t - x.t, w = m.w + x.l + x.r, h = m.h + x.t + x.b;
-		const zStr = rec.plane ? (isNaN(m.wz) ? '' : String(m.wz)) : '';
-		const opStr = rec.plane ? m.op : '';
-		const visStr = rec.plane ? m.vis : '';
-		const dispStr = rec.plane ? (m.disp === 'none' ? 'none' : '') : '';
+		const zStr = isWrapped ? (isNaN(m.wz) ? '' : String(m.wz)) : '';
+		const opStr = isWrapped ? m.op : '';
+		const visStr = isWrapped ? m.vis : '';
+		const dispStr = isWrapped ? (m.disp === 'none' ? 'none' : '') : '';
 
 		const p = rec.placed;
 		if (
@@ -3621,19 +3550,17 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 			p.bl === x.l && p.bt === x.t && p.bw === m.w && p.bh === m.h &&
 			p.z === zStr && p.op === opStr && p.vis === visStr && p.disp === dispStr
 		) {
-			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
 			return;
 		}
 
 		const s = rec.layer.style;
 		s.left = l + 'px'; s.top = t + 'px';
 		s.width = w + 'px'; s.height = h + 'px';
-		if (rec.plane) {
+		if (isWrapped) {
 			if (s.zIndex !== zStr) s.zIndex = zStr;
 			if (s.opacity !== opStr) s.opacity = opStr;
 			if (s.visibility !== visStr) s.visibility = visStr;
 			if (s.display !== dispStr) s.display = dispStr;
-			if (rec.stageEl) updatePlaneStacking(rec.stageEl);
 		}
 
 		const b = rec.bf.style; // the blur element covers the box only

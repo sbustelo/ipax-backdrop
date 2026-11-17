@@ -163,7 +163,9 @@
 		const scanPointerNone = (root) => {
 			for (let d = root.firstElementChild; d; d = d.nextElementSibling) {
 				if (d.tagName === layerTag || d.tagName === planeTag) continue;
-				if (Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d))) continue;
+				if (selfRec && (d === selfRec.el || d === selfRec.wrapper)) continue;
+				const dRec = Comp.recordFor(d) || (Comp.isWrapper && Comp.isWrapper(d) ? Comp.ownerRecord(d) : null);
+				if (dRec && selfRec && Comp.isAbove && Comp.isAbove(dRec, selfRec)) continue;
 				const cs = getComputedStyle(d);
 				if (cs.display === 'none' || parseFloat(cs.opacity) <= 0) continue;
 				scanPointerNone(d);

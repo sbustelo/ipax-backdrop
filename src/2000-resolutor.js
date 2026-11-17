@@ -141,7 +141,6 @@
 		// Already-computed managed layers strictly below this record (sorted bottom-to-top).
 		const below = Comp.layersBelow ? Comp.layersBelow(rec, R) : [];
 		const selfRoot = rec.wrapper || rec.el;
-		const stageRoot = rec.plane ? rec.plane.parentElement : null;
 		const hostParent = selfRoot.parentElement;
 		const ownerOf = (e) => {
 			if (!Comp.ownerRecord) return null;
@@ -162,9 +161,9 @@
 			if (!e || e.nodeType !== 1) return 0;
 			let v = zCache.get(e);
 			if (v !== undefined) return v;
-			if (stageRoot && e !== stageRoot && stageRoot.contains(e)) {
+			if (hostParent && e !== hostParent && hostParent.contains(e)) {
 				let cur = e;
-				while (cur && cur.parentElement !== stageRoot) cur = cur.parentElement;
+				while (cur && cur.parentElement !== hostParent) cur = cur.parentElement;
 				if (cur) {
 					const z = parseInt(getComputedStyle(cur).zIndex, 10);
 					v = isNaN(z) ? 0 : z;
@@ -201,7 +200,7 @@
 			const flushBelowAbove = (minZ) => {
 				while (bi >= 0 && !cut) {
 					const BL = below[bi];
-					if (minZ !== null && BL.z < minZ) break;
+					if (minZ !== null && BL.z <= minZ) break;
 					bi--;
 					if (!covers(BL, px, py)) continue;
 					stack.push(BL);
@@ -222,14 +221,13 @@
 					const owner = ownerOf(e);
 					if (owner && owner !== rec) {
 						if (Comp.isAbove && Comp.isAbove(owner, rec)) continue;
-						// Managed elements sit above the layer plane; their corrected canvas is merged via `below`.
-						if (e === owner.el || owner.el.contains(e)) continue;
+						// Child content inside a lower managed element is skipped; its own background and corrected canvas still compose.
+						if (owner.el.contains(e) && e !== owner.el) continue;
 					}
 
 					const ez = elemZ(e);
 					if (isFixed(e) && ez > rec.z) continue;
-					if (stageRoot && stageRoot.contains(e) && e !== stageRoot && ez > rec.z) continue;
-					if (!stageRoot && hostParent && hostParent.contains(e) && e !== hostParent) {
+					if (hostParent && hostParent.contains(e) && e !== hostParent) {
 						let sib = e;
 						while (sib && sib.parentElement !== hostParent) sib = sib.parentElement;
 						if (sib && sib !== selfRoot && sib.tagName !== layerTag) {

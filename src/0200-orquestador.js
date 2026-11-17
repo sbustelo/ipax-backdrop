@@ -159,7 +159,7 @@
 			const zChanged = geo[i].z !== rec.z;
 
 			rec.z = geo[i].z;
-			const item = { r: rec, R, fullyInView, z: rec.z, domOrder: rec.domOrder };
+			const item = { r: rec, R, fullyInView, z: rec.z, domOrder: rec.domOrder, zChanged };
 			entries.push(item);
 
 			const isDirty = !clean(rec) || sizeChanged || posChanged || zChanged;
@@ -193,6 +193,16 @@
 				if (rectsOverlap(rOld, upper.R) || rectsOverlap(rNew, upper.R)) {
 					upper.r.settled = false;
 					dirtySet.add(upper.r);
+				}
+			}
+			if (src.zChanged) {
+				for (let j = 0; j < i; j++) {
+					const lower = entries[j];
+					if (dirtySet.has(lower.r)) continue;
+					if (rectsOverlap(rOld, lower.R) || rectsOverlap(rNew, lower.R)) {
+						lower.r.settled = false;
+						dirtySet.add(lower.r);
+					}
 				}
 			}
 		}

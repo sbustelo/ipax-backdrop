@@ -20,7 +20,7 @@
  * Unknown reasons: transform, filter, mix-blend-mode, backdrop-filter (on a
  * non-managed element), pseudo-element with a background, gradient,
  * unsupported background, attachment/origin, image not loaded, geometry,
- * color, object-fit.
+ * color, object-fit, video, animated image (.gif by extension).
  *
  * FRAME CACHE (v0.1.05+): between beginFrame() and endFrame() the descriptors of
  * every NON-managed element, and the inherited-risk chain of every ancestor, are
@@ -64,6 +64,16 @@
 		try { const x = new URL(u, location.href); return !(x.protocol === 'blob:' || x.protocol === 'data:' || x.origin === location.origin); }
 		catch (e) { return true; }
 	};
+
+	/** Image format from a URL: the subtype of a data: URL, else the file extension (lowercase, '' if none). */
+	const imgKind = (u) => {
+		const s = String(u || '');
+		if (/^data:/i.test(s)) { const m = /^data:image\/([a-z0-9.+-]+)/i.exec(s.slice(0, 40)); return m ? m[1].toLowerCase() : ''; }
+		const m = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(s);
+		return m ? m[1].toLowerCase() : '';
+	};
+	/** Only JPEG is known to be opaque. Any other format may carry alpha, so its layer must not cut the stack below it. */
+	const isOpaqueKind = (k) => k === 'jpg' || k === 'jpeg';
 
 	/** Pure 2D scale/translation matrix (no rotation or skew) used by zoomed stage containers. */
 	function isPureScaleTransform(tr) {
@@ -120,12 +130,16 @@
 		};
 
 		if (e.tagName === 'IMG') {
-			if (!(e.complete && e.naturalWidth)) out.push(mk({ k: 'unk', why: 'image not loaded' }));
+			const kind = imgKind(e.currentSrc || e.src);
+			if (kind === 'gif') out.push(mk({ k: 'unk', why: 'animated image' }));
+			else if (!(e.complete && e.naturalWidth)) out.push(mk({ k: 'unk', why: 'image not loaded' }));
 			else {
 				const g = G.objectFitGeometry(e.naturalWidth, e.naturalHeight, pa, cs.objectFit, cs.objectPosition);
-				out.push(g ? mk({ k: 'img', img: e, g, a: risk.op, tainted: isTainted(e.currentSrc), r }) : mk({ k: 'unk', why: 'object-fit' }));
+				out.push(g ? mk({ k: 'img', img: e, g, a: risk.op, nocut: !isOpaqueKind(kind), tainted: isTainted(e.currentSrc), r }) : mk({ k: 'unk', why: 'object-fit' }));
 			}
 		}
+
+		if (e.tagName === 'VIDEO') out.push(mk({ k: 'unk', why: 'video' }));
 
 		const list = cs.backgroundImage === 'none' ? [] : G.splitTop(cs.backgroundImage);
 		const sizes = G.splitTop(cs.backgroundSize), poss = G.splitTop(cs.backgroundPosition), reps = G.splitTop(cs.backgroundRepeat);
@@ -134,12 +148,14 @@
 			const at = (a) => a[i % a.length]; // CSS repeats shorter lists to match the image count
 			const m = /^url\(["']?(.*?)["']?\)$/.exec(s);
 			if (!m) { out.push(mk({ k: 'unk', why: /gradient/.test(s) ? 'gradient' : 'unsupported background' })); return; }
+			const kind = imgKind(m[1]);
+			if (kind === 'gif') { out.push(mk({ k: 'unk', why: 'animated image' })); return; }
 			if (at(atts) === 'fixed' || at(orgs) !== 'padding-box') { out.push(mk({ k: 'unk', why: 'attachment/origin' })); return; }
 			const img = imageFor(m[1]);
 			if (!img) { out.push(mk({ k: 'unk', why: 'image not loaded' })); return; }
 			const rp = G.parseRepeat(at(reps)), g = rp && G.backgroundGeometry(img.naturalWidth, img.naturalHeight, pa, at(sizes), at(poss), rp);
 			if (!g) { out.push(mk({ k: 'unk', why: 'geometry' })); return; }
-			out.push(mk({ k: 'img', img, g, a: risk.op, tainted: isTainted(m[1]), r }));
+			out.push(mk({ k: 'img', img, g, a: risk.op, nocut: !isOpaqueKind(kind), tainted: isTainted(m[1]), r }));
 		});
 
 		const c = Color.parseCssColor(cs.backgroundColor);

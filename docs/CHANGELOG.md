@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.12 • 18/nov/2026
+
+- **Alpha-Aware Stack Cut for Images (`2100-resolutor-capas.js`):**
+  - Image layers (`<img>` and `background-image`) now carry `nocut` unless the format is JPEG, read from the file extension or the `data:image/<subtype>` prefix. Previously every image layer with element opacity 1 cut the layer stack below it, so the transparent pixels of PNG, WebP, SVG or GIF were composited over the page base color instead of the content actually underneath. A URL with no extension (CDN, `/photo?id=3`) counts as non-JPEG.
+- **Veil for Animated GIF (`2100-resolutor-capas.js`):**
+  - A `.gif` file (or `data:image/gif`) used as `<img>` or `background-image` is now marked unknown with reason `animated image`, so it receives the translucent veil. Previously the engine drew only its first frame. Not detected: GIFs served from `blob:` URLs without an extension, animated PNG, animated WebP and animated AVIF.
+- **Veil for `<video>` (`2100-resolutor-capas.js`):**
+  - A `<video>` element is now marked unknown with reason `video`. Previously it was ignored and the engine rendered whatever was behind it.
+
+
 ## 0.1.11 • 17/nov/2026
 
 - **Starvation-Free Round-Robin Frame Scheduler (`0200-orquestador.js`):**
@@ -170,4 +180,4 @@
 
 ---
 
-_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.12 • 2026-11-18 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

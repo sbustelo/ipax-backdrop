@@ -49,16 +49,17 @@ The engine rebuilds the background behind an element from what it can read and r
 
 | Backdrop | Status | Behavior |
 |---|---|---|
-| Images (`background-image`, `<img>`), including moving ones | Supported | Redrawn and corrected. |
+| Images (`background-image`, `<img>`), including moving ones | Supported | Redrawn and corrected. Transparency (PNG, WebP, SVG) is respected: whatever is underneath shows through. |
 | Flat colors, including translucent (`rgba()`) | Supported | Redrawn and corrected. |
 | CSS gradients | Veiled | Marked as unknown. A translucent veil guarantees the ratio against the worst possible backdrop. |
 | CSS-transformed elements (rotated, etc.) | Veiled | Marked as unknown. Same veil. |
-| Animated GIF | Unsupported | As tested, only the first frame is shown, static and flattened without transparency. Same result as `<img>` and as `background-image`. |
-| `<video>` | Unsupported | Not marked as unknown. It is ignored and the engine renders whatever is behind it. |
+| Animated GIF (`.gif`) | Veiled | Detected by file extension (or `data:image/gif`), as `<img>` or `background-image`. Marked as unknown. Not detected: GIFs served from `blob:` URLs without an extension, animated PNG and animated WebP. Those are drawn as a static first frame. |
+| `<video>` | Veiled | Marked as unknown. The veil covers the element's box, including any `object-fit` letterbox. Video frames are not sampled. |
+| CSS `mask`, `clip-path` | Unsupported | Not processed and not marked as unknown. The element is redrawn as if it were not masked. |
 
-`examples/index.html` shows the supported cases (movable pictures, flat and translucent colors) and the veiled ones (gradient, rotated box).
+`examples/index.html` shows supported cases (movable pictures, flat and translucent colors) and the veiled ones (gradient, rotated box).
 
-GIF and video support is not planned for this version. Detecting them to apply a veil, or sampling every N frames, are possible future improvements.
+The image format is read from the URL (file extension, or the `data:` subtype). Only JPEG is treated as opaque. Any other format may carry transparency, so what lies beneath it stays in the estimate. A URL with no extension counts as non-JPEG: the result is correct, with a little more painting work.
 
 
 ## Online example
@@ -104,7 +105,7 @@ docs/            documentation
 
 ## Status
 
-Version `0.1.11`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
+Version `0.1.12`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
 
 ## License
 
@@ -121,4 +122,4 @@ Entirely optional, never required.
 
 ---
 
-_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.11 • 2026-11-17 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.12 • 2026-11-18 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

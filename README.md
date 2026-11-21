@@ -105,7 +105,7 @@ docs/            documentation
 
 ## Status
 
-Version `0.1.12`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
+Version `0.1.13`, pre-release. Tested on Chrome, Firefox, and Safari (macOS and iOS).
 
 ## License
 
@@ -122,4 +122,4 @@ Entirely optional, never required.
 
 ---
 
-_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.12 • 2026-11-18 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.13 • 2026-11-21 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

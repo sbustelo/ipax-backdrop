@@ -1,32 +1,36 @@
-/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: 2026-11-18 */
+/*! IPAX Backdrop • ipax.bustelo.com.ar • Build: 2026-11-21 */
+;
 
-/* --- lib/j0-kernel/01-bus-j0kernel.js --- */
-/* j0 framework kernel 0.4.01 • 11/nov/2026
- * Santiago Bustelo, https://bustelo.com.ar/ 
- * Apache License, Version 2.0 */
-
+/* === SOURCE: 01-j0kernel.js === */
 (function () {
     'use strict';
 
-    window.j0 = window.j0 || {};
-    if (window.j0.EventChannel) return;
+    const root = typeof globalThis !== 'undefined'
+        ? globalThis
+        : (typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : {}));
 
-    window.j0.EventChannel = class EventChannel {
-        constructor(name) {
+    root.j0 = root.j0 || {};
+    const j0 = root.j0;
+
+    if (j0.bus && j0.registry) {
+        return;
+    }
+
+    class EventChannel {
+        constructor(name = 'global') {
             this.name = name;
             this._handlers = new Map();
         }
 
         emit(action, payload = {}) {
-            if (window.j0 && window.j0.QA && window.j0.bus && window.j0.bus.schema) {
-                const contract = window.j0.bus.schema[action];
+            if (j0.QA && j0.bus && j0.bus.schema) {
+                const contract = j0.bus.schema[action];
                 if (contract) {
                     for (const [key, expectedType] of Object.entries(contract)) {
                         const actualType = typeof payload[key];
                         if (actualType !== expectedType) {
-                            const msg = `[J0_BUS_SCHEMA] Payload inválido en evento '${action}': '${key}' debe ser '${expectedType}', recibido '${actualType}'.`;
-                            if (window.j0?.logger) window.j0.logger.error(msg);
-                            else console.error(msg);
+                            const msg = '[j0:bus:schema] Invalid payload on \'' + action + '\': \'' + key + '\' must be \'' + expectedType + '\', got \'' + actualType + '\'.';
+                            j0.logger.error(msg);
                             throw new Error(msg);
                         }
                     }
@@ -34,204 +38,111 @@
             }
 
             const set = this._handlers.get(action);
-            if (!set || set.size === 0) return;
-            
-            new Set(set).forEach(fn => {
-                try { 
-                    fn(payload); 
-                } catch (e) { 
-                    const fnSource = fn.toString().substring(0, 50) + "...";
-                    if (window.j0 && window.j0.logger) {
-                        window.j0.logger.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}'. Handler: ${fnSource}`, e);
-                    } else {
-                        console.error(`[TELEMETRÍA] CRASH en Bus '${this.name}' evento '${action}':`, e);
-                    }
+            if (!set || set.size === 0) {
+                return;
+            }
+
+            new Set(set).forEach((fn) => {
+                try {
+                    fn(payload);
+                } catch (err) {
+                    const preview = fn.toString().substring(0, 60) + '...';
+                    j0.logger.error('[j0:bus] Handler crash on \'' + this.name + ':' + action + '\' (' + preview + ')', err);
                 }
             });
         }
 
         on(action, handler) {
-            if (!this._handlers.has(action)) this._handlers.set(action, new Set());
+            if (typeof handler !== 'function') {
+                return () => {};
+            }
+            if (!this._handlers.has(action)) {
+                this._handlers.set(action, new Set());
+            }
             this._handlers.get(action).add(handler);
             return () => {
-                const set = this._handlers.get(action);
-                if (set) {
-                    set.delete(handler);
-                    if (set.size === 0) this._handlers.delete(action);
-                }
+                this.off(action, handler);
             };
         }
+
+        off(action, handler) {
+            const set = this._handlers.get(action);
+            if (!set) {
+                return;
+            }
+            set.delete(handler);
+            if (set.size === 0) {
+                this._handlers.delete(action);
+            }
+        }
+
+        once(action, handler) {
+            const wrapper = (payload) => {
+                this.off(action, wrapper);
+                handler(payload);
+            };
+            return this.on(action, wrapper);
+        }
+    }
+
+    const MAX_LOG_ENTRIES = 200;
+    const logEntries = [];
+
+    function recordLog(level, msg, data) {
+        const entry = { level, msg: String(msg), data: data ?? null, ts: Date.now() };
+        logEntries.push(entry);
+        if (logEntries.length > MAX_LOG_ENTRIES) {
+            logEntries.shift();
+        }
+        if (j0.bus && level !== 'silent') {
+            j0.bus.emit('j0:log', { level, msg: entry.msg });
+        }
+        return entry;
+    }
+
+    j0.EventChannel = EventChannel;
+    j0.bus = j0.bus || new EventChannel('global');
+    j0.bus.schema = j0.bus.schema || {};
+    j0.registry = j0.registry || new Map();
+
+    j0.logger = j0.logger || {
+        log(msg, data) {
+            recordLog('info', msg, data);
+            if (j0.QA || j0.env === 'local') {
+                console.log('[j0] ' + msg, data ?? '');
+            }
+        },
+        warn(msg, data) {
+            recordLog('warn', msg, data);
+            console.warn('[j0:warn] ' + msg, data ?? '');
+        },
+        error(msg, data) {
+            recordLog('error', msg, data);
+            console.error('[j0:error] ' + msg, data ?? '');
+        },
+        history() {
+            return logEntries.slice();
+        },
+        clear() {
+            logEntries.length = 0;
+        }
     };
+
+    j0.register = (name, instance) => {
+        j0.registry.set(name, instance);
+        j0.bus.emit('j0:module:registered', { name });
+        return instance;
+    };
+
+    j0.get = (name) => j0.registry.get(name) ?? null;
+    j0.has = (name) => j0.registry.has(name);
+
+    j0.bus.schema['j0:module:registered'] = { name: 'string' };
+    j0.bus.schema['j0:log'] = { level: 'string', msg: 'string' };
 })();
 ;
 
-/* --- lib/j0-kernel/02-core-j0kernel.js --- */
-/* j0 framework kernel 0.4.01 (sans manifest, logger, i18n, M helper) • 11/nov/2026
- * Santiago Bustelo, https://bustelo.com.ar/ 
- * Apache License, Version 2.0 */
-
- (function () {
-	"use strict";
-	
-	if (window.j0 && window.j0.registry) return;
-
-	window.j0 = window.j0 || {};
-	
-	// [!] Instanciación real del Bus de Eventos.
-	window.j0.bus = window.j0.bus || new window.j0.EventChannel("global");
-	window.j0.bus.schema = window.j0.bus.schema || {};
-
-	window.j0.registry = window.j0.registry || new Map();
-
-	/* 
-	// [IPAX-BACKDROP EXCLUSIONS]
-	// The following features belong to the full j0 UI framework and are 
-	// safely commented out here to reduce the standalone ipax-backdrop footprint:
-	// - manifest
-	// - logger (with its 3-second timeout)
-	// - i18n (dictionary and DOM updater)
-	// - helpers (M translation function)
-
-	window.j0.manifest = window.j0.manifest || { bases: {}, tpl_bases: {} };
-
-    window.j0.logger = window.j0.logger || {
-        _bootQueue: [],
-        _isBroken: false,
-        _flushNative: function() {
-            this._bootQueue.forEach(item => {
-                const out = \`[J0:PRE-BOOT] [\${item.type}] \${item.msg}\`;
-                if (item.type === 'ERROR') console.error(out, item.data || '');
-                else if (item.type === 'WARN') console.warn(out, item.data || '');
-                else console.log(out, item.data || '');
-            });
-            this._bootQueue = [];
-            this._isBroken = true;
-        },
-        log: function(msg, data) { 
-            if (this._isBroken) console.log(\`[J0:PRE-BOOT] [INFO] \${msg}\`, data || '');
-            else this._bootQueue.push({ type: 'INFO', msg, data }); 
-        },
-        warn: function(msg, data) { 
-            if (this._isBroken) console.warn(\`[J0:PRE-BOOT] [WARN] \${msg}\`, data || '');
-            else this._bootQueue.push({ type: 'WARN', msg, data }); 
-        },
-        error: function(msg, data) { 
-            this._bootQueue.push({ type: 'ERROR', msg, data });
-            this._flushNative();
-        }
-    };
-
-    setTimeout(() => {
-        if (window.j0.logger && window.j0.logger._bootQueue && window.j0.logger._bootQueue.length > 0) {
-            console.error("[j0:Kernel] TIMEOUT: El OS j0ui no logró instanciarse. Volcando bitácora de arranque:");
-            window.j0.logger._flushNative();
-        }
-    }, 3000);
-
-	window.j0.i18n = {
-		dicts: {},
-		stringsEmitted: new Set(),
-        isReady: false,
-		slugify: function(text) {
-			if (!text) return '';
-			return text
-				.replace(/<[^>]*>/g, '')
-				.normalize("NFD")
-				.replace(/[\\u0300-\\u036f]/g, "")
-				.toLowerCase()
-				.replace(/[^a-z0-9]/g, "")
-				.substring(0, 40);
-		},
-		add: function(lang, translations) {
-			if (!this.dicts[lang]) this.dicts[lang] = {};
-			for (const [key, value] of Object.entries(translations)) {
-				if (window.j0.env === 'local' && this.dicts[lang][key] && this.dicts[lang][key] !== value) {
-					if (window.j0.logger) window.j0.logger.warn(\`[i18n:Collision] La llave '\${key}' ('\${this.dicts[lang][key]}') fue pisada por '\${value}'.\`);
-				}
-				this.dicts[lang][key] = value;
-			}
-			if (window.j0.bus) window.j0.bus.emit('j0:i18n:dictionary-updated', { lang });
-		},
-        updateDOM: function(forceFallback = false) {
-            const lang = window.j0.lang || document.documentElement.lang || 'en';
-            const dict = this.dicts[lang] || {};
-
-            document.querySelectorAll('.j0ui-text-spinner[data-j0-i18n-key]').forEach(el => {
-                const key = el.getAttribute('data-j0-i18n-key');
-                let resolvedText = null;
-                
-                if (!forceFallback && dict[key] !== undefined) {
-                    resolvedText = dict[key];
-                } else {
-                    const delNode = el.querySelector('del');
-                    resolvedText = delNode ? delNode.textContent : key;
-                }
-
-                el.innerHTML = resolvedText;
-                el.removeAttribute('aria-busy');
-                el.removeAttribute('aria-label');
-                el.classList.remove('j0ui-text-spinner');
-                el.removeAttribute('data-j0-i18n-key');
-            });
-
-            document.querySelectorAll('[data-j0-i18n-attr]').forEach(el => {
-                try {
-                    const map = JSON.parse(el.getAttribute('data-j0-i18n-attr'));
-                    let updated = false;
-                    Object.entries(map).forEach(([attr, key]) => {
-                        if (!forceFallback && dict[key] !== undefined) {
-                            el.setAttribute(attr, dict[key]);
-                            delete map[attr];
-                            updated = true;
-                        } else if (forceFallback) {
-                            delete map[attr];
-                            updated = true;
-                        }
-                    });
-                    if (updated) {
-                        if (Object.keys(map).length === 0) el.removeAttribute('data-j0-i18n-attr');
-                        else el.setAttribute('data-j0-i18n-attr', JSON.stringify(map));
-                    }
-                } catch (e) {}
-            });
-        }
-	};
-
-	window.j0.helpers = window.j0.helpers || {};
-
-	window.j0.helpers.M = function(text) {
-		if (!text) return '';
-		const lang = window.j0.lang || document.documentElement.lang || 'en';
-		const key = window.j0.i18n.slugify(text);
-		const dict = window.j0.i18n.dicts[lang] || {};
-		
-        if (window.j0.i18n.isReady) {
-            const resolvedValue = dict[key] !== undefined ? dict[key] : text;
-            window.j0.i18n.stringsEmitted.add(resolvedValue);
-            return resolvedValue;
-        }
-
-		if (dict[key] !== undefined) {
-            const resolvedValue = dict[key];
-            window.j0.i18n.stringsEmitted.add(resolvedValue);
-			if (window.j0.bus) window.j0.bus.emit('j0:i18n:string-emitted', { resolved: resolvedValue, key, original: text });
-            return resolvedValue;
-        }
-
-        return \`<span class="j0ui-text-spinner" data-j0-i18n-key="\${key}" aria-busy="true" aria-label="Loading..."><del aria-hidden="true" style="visibility:hidden;pointer-events:none;">\${text}</del></span>\`;
-	};
-	*/
-
-	window.j0.register = (name, instance) => {
-		window.j0.registry.set(name, instance);
-		if (window.j0.bus) window.j0.bus.emit("module:registered", { name });
-	};
-
-	window.j0.get = (name) => window.j0.registry.get(name);
-})();
-;
-
-/* --- src/0010-nucleo.js --- */
+/* === SOURCE: 0010-nucleo.js === */
 /**
  * ipax-backdrop / 0010-nucleo.js
  * SPDX-License-Identifier: Apache-2.0
@@ -317,7 +228,7 @@
 })();
 ;
 
-/* --- src/0100-util-color.js --- */
+/* === SOURCE: 0100-util-color.js === */
 /**
  * ipax-backdrop / 0100-util-color.js
  * SPDX-License-Identifier: Apache-2.0
@@ -389,7 +300,7 @@
 })();
 ;
 
-/* --- src/0110-util-contrast.js --- */
+/* === SOURCE: 0110-util-contrast.js === */
 /**
  * ipax-backdrop / 0110-util-contrast.js
  * SPDX-License-Identifier: Apache-2.0
@@ -519,7 +430,7 @@
 })();
 ;
 
-/* --- src/0200-orquestador.js --- */
+/* === SOURCE: 0200-orquestador.js === */
 /**
  * ipax-backdrop / 0200-orquestador.js (v0.1.10)
  *
@@ -1106,7 +1017,7 @@
 })();
 ;
 
-/* --- src/1000-lector.js --- */
+/* === SOURCE: 1000-lector.js === */
 // PATH: src/1000-lector.js
 /**
  * ipax-backdrop / 1000-lector.js
@@ -1389,7 +1300,7 @@
 })();
 ;
 
-/* --- src/1100-lector-texto.js --- */
+/* === SOURCE: 1100-lector-texto.js === */
 // PATH: src/1100-lector-texto.js
 /**
  * ipax-backdrop / 1100-lector-texto.js
@@ -1484,7 +1395,7 @@
 })();
 ;
 
-/* --- src/2000-resolutor.js --- */
+/* === SOURCE: 2000-resolutor.js === */
 // PATH: src/2000-resolutor.js
 /**
  * ipax-backdrop / 2000-resolutor.js
@@ -1870,7 +1781,7 @@
 })();
 ;
 
-/* --- src/2100-resolutor-capas.js --- */
+/* === SOURCE: 2100-resolutor-capas.js === */
 // PATH: src/2100-resolutor-capas.js
 /**
  * ipax-backdrop / 2100-resolutor-capas.js
@@ -2079,7 +1990,7 @@
 })();
 ;
 
-/* --- src/2200-resolutor-geometria.js --- */
+/* === SOURCE: 2200-resolutor-geometria.js === */
 /**
  * ipax-backdrop / 2200-resolutor-geometria.js
  * SPDX-License-Identifier: Apache-2.0
@@ -2167,7 +2078,7 @@
 })();
 ;
 
-/* --- src/2300-resolutor-desenfoque.js --- */
+/* === SOURCE: 2300-resolutor-desenfoque.js === */
 /**
  * ipax-backdrop / 2300-resolutor-desenfoque.js
  * SPDX-License-Identifier: Apache-2.0
@@ -2346,7 +2257,7 @@
 })();
 ;
 
-/* --- src/2400-resolutor-halo.js --- */
+/* === SOURCE: 2400-resolutor-halo.js === */
 /**
  * ipax-backdrop / 2400-resolutor-halo.js
  * SPDX-License-Identifier: Apache-2.0
@@ -2561,7 +2472,7 @@
 })();
 ;
 
-/* --- src/3000-kernel.js --- */
+/* === SOURCE: 3000-kernel.js === */
 /**
  * ipax-backdrop / 3000-kernel.js
  * SPDX-License-Identifier: Apache-2.0
@@ -2633,7 +2544,7 @@
 })();
 ;
 
-/* --- src/3100-kernel-cpu.js --- */
+/* === SOURCE: 3100-kernel-cpu.js === */
 /**
  * ipax-backdrop / 3100-kernel-cpu.js
  * SPDX-License-Identifier: Apache-2.0
@@ -2863,7 +2774,7 @@
 })();
 ;
 
-/* --- src/3200-kernel-webgl.js --- */
+/* === SOURCE: 3200-kernel-webgl.js === */
 /**
  * ipax-backdrop / 3200-kernel-webgl.js
  * SPDX-License-Identifier: Apache-2.0
@@ -3149,7 +3060,7 @@
 })();
 ;
 
-/* --- src/3210-kernel-webgl-shaders.js --- */
+/* === SOURCE: 3210-kernel-webgl-shaders.js === */
 /**
  * ipax-backdrop / 3210-kernel-webgl-shaders.js
  * SPDX-License-Identifier: Apache-2.0
@@ -3183,7 +3094,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 })();
 ;
 
-/* --- src/4000-compositor.js --- */
+/* === SOURCE: 4000-compositor.js === */
 /**
  * ipax-backdrop / 4000-compositor.js
  * SPDX-License-Identifier: Apache-2.0
@@ -3680,7 +3591,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 })();
 ;
 
-/* --- src/9000-api.js --- */
+/* === SOURCE: 9000-api.js === */
 /**
  * ipax-backdrop / 9000-api.js
  * SPDX-License-Identifier: Apache-2.0
@@ -3688,7 +3599,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
  * CHAPTER 9 - PUBLIC API. The only service meant for library users.
  *
  *   const api = window.j0.get('ipax-backdrop');
- *   api.version      '0.1.10'
+ *   api.version      '0.1.13'
  *   api.config       live configuration object
  *   api.start()      scan the page and start (done automatically unless config.autoStart is false)
  *   api.stop()       remove every layer and stop
@@ -3702,7 +3613,7 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const api = {
-		version: '0.1.11',
+		version: '0.1.13',
 		start: () => svc('orchestrator').start(),
 		stop: () => svc('orchestrator').stop(),
 		refresh: () => svc('orchestrator').refresh(),
@@ -3716,5 +3627,3 @@ uniform sampler2D uEst; uniform sampler2D uEstBlur; uniform float uHasBlur; unif
 	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 	else boot();
 })();
-;
-

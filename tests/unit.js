@@ -17,13 +17,50 @@ global.ImageData = class { constructor(d, w, h) { this.data = d; this.width = w;
 function makeCanvas() {
 	const c = { _w: 1, _h: 1, gl: null, ext: null, __rgba: null };
 	const resize = () => { if (c.gl && c.ext) c.ext.resize(c._w, c._h); };
+	const ensureBuffer = () => {
+		const len = Math.max(1, c._w) * Math.max(1, c._h) * 4;
+		if (!c.__rgba || c.__rgba.length !== len) c.__rgba = new Uint8ClampedArray(len);
+		return c.__rgba;
+	};
 	Object.defineProperty(c, 'width', { get() { return c._w; }, set(v) { c._w = v; resize(); } });
 	Object.defineProperty(c, 'height', { get() { return c._h; }, set(v) { c._h = v; resize(); } });
 	c.addEventListener = () => {};
 	c.getContext = (type) => {
 		if (type === '2d') return {
-			putImageData(id) { c.__rgba = id.data; },
-			getImageData() { return { data: c.__rgba }; },
+			putImageData(id) { c.__rgba = new Uint8ClampedArray(id.data); },
+			getImageData(sx = 0, sy = 0, gw = c._w, gh = c._h) {
+				const buf = ensureBuffer();
+				if (sx === 0 && sy === 0 && gw === c._w && gh === c._h) return { data: buf, width: gw, height: gh };
+				const out = new Uint8ClampedArray(gw * gh * 4);
+				for (let y = 0; y < gh; y++) {
+					for (let x = 0; x < gw; x++) {
+						const tx = sx + x, ty = sy + y;
+						if (tx < 0 || ty < 0 || tx >= c._w || ty >= c._h) continue;
+						const sq = (ty * c._w + tx) * 4, dq = (y * gw + x) * 4;
+						out[dq] = buf[sq]; out[dq + 1] = buf[sq + 1]; out[dq + 2] = buf[sq + 2]; out[dq + 3] = buf[sq + 3];
+					}
+				}
+				return { data: out, width: gw, height: gh };
+			},
+			drawImage(src, a, b, d, e, f, g, h, k) {
+				if (!src || !src.__rgba) return;
+				let sx = 0, sy = 0, sw = src._w, sh = src._h, dx = a || 0, dy = b || 0, dw = src._w, dh = src._h;
+				if (arguments.length === 5) { dw = d; dh = e; }
+				else if (arguments.length >= 9) { sx = a; sy = b; sw = d; sh = e; dx = f; dy = g; dw = h; dh = k; }
+				const dst = ensureBuffer();
+				for (let j = 0; j < dh; j++) {
+					const ty = Math.round(dy + j);
+					if (ty < 0 || ty >= c._h) continue;
+					const uy = Math.min(src._h - 1, Math.max(0, Math.floor(sy + (j + 0.5) * sh / dh)));
+					for (let i = 0; i < dw; i++) {
+						const tx = Math.round(dx + i);
+						if (tx < 0 || tx >= c._w) continue;
+						const ux = Math.min(src._w - 1, Math.max(0, Math.floor(sx + (i + 0.5) * sw / dw)));
+						const sq = (uy * src._w + ux) * 4, dq = (ty * c._w + tx) * 4;
+						dst[dq] = src.__rgba[sq]; dst[dq + 1] = src.__rgba[sq + 1]; dst[dq + 2] = src.__rgba[sq + 2]; dst[dq + 3] = src.__rgba[sq + 3];
+					}
+				}
+			},
 			clearRect() {},
 			fillRect() {}
 		};
@@ -41,9 +78,23 @@ function makeCanvas() {
 }
 global.document = { readyState: 'loading', addEventListener() {}, createElement: (t) => (t === 'canvas' ? makeCanvas() : {}) };
 
-const files = ['lib/j0-kernel/01-bus-j0kernel.js', 'lib/j0-kernel/02-core-j0kernel.js']
-	.concat(fs.readdirSync(path.join(ROOT, 'src')).filter((f) => f.endsWith('.js')).sort().map((f) => 'src/' + f));
-for (const f of files) vm.runInThisContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), { filename: f });
+function findJ0Kernel() {
+	let dir = ROOT;
+	for (let i = 0; i < 6; i++) {
+		for (const rel of ['j0/core/01-j0kernel.js', 'ai0/j0/core/01-j0kernel.js']) {
+			const cand = path.join(dir, rel);
+			if (fs.existsSync(cand)) return cand;
+		}
+		const parent = path.dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	throw new Error('j0/core/01-j0kernel.js not found');
+}
+
+const files = [findJ0Kernel()]
+	.concat(fs.readdirSync(path.join(ROOT, 'src')).filter((f) => f.endsWith('.js')).sort().map((f) => path.join(ROOT, 'src', f)));
+for (const f of files) vm.runInThisContext(fs.readFileSync(f, 'utf8'), { filename: path.relative(ROOT, f) });
 
 const j0 = window.j0, S = (n) => j0.get('ipax-backdrop:' + n);
 let fails = 0;

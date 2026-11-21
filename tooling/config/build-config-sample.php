@@ -1,27 +1,17 @@
 <?php
+// PATH: tooling/config/build-config-sample.php
 /**
- * ============================================================================
  * BUILDER CONFIGURATION SAMPLE
- * 
- * Fill with production settings and rename this file to:
- * _build-config.php (with leading underscore to prevent VCS tracking).
- * ============================================================================
+ * Copy to _build-config.php (leading underscore prevents VCS tracking).
  */
 
 return [
-    // Output target path relative to the repository root
     'output_file' => 'dist/ipax-backdrop.js',
-
-    // Console / Browser output toggle (true: print success message, false: silent)
     'echo' => true,
-
-    // Source directories in strict order of resolution and bundling
+    'include_j0_kernel' => true,
     'sources' => [
-        'lib',
         'src'
     ],
-
-    // Minification parameters (Phase 2)
     'minify' => [
         'enabled' => true,
         'api_url' => 'https://www.toptal.com/developers/javascript-minifier/api/raw',

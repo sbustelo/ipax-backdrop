@@ -118,6 +118,11 @@ html, body {
 	align-items: center;
 	justify-content: center;
 	flex: none;
+	transition: transform 0.15s ease;
+}
+
+.ed-panel-toggle[aria-expanded="false"] {
+	transform: rotate(-90deg);
 }
 
 .ed-panel-toggle:hover {

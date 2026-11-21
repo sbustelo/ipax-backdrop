@@ -1,98 +1,88 @@
 <?php
 // PATH: examples/performance-longpage.php
-$htmlFile = __DIR__ . '/performance-longpage.html';
-if (is_file($htmlFile) && filemtime($htmlFile) >= filemtime(__FILE__)) {
-	readfile($htmlFile);
-	exit;
-}
+require_once __DIR__ . '/php/ex-bootstrap.php';
+require_once __DIR__ . '/php/perf-config.php';
 
-$cols = 4;
-$targetBoxes = 400;
-$occupied = [];
-$boxes = [];
-$maxRow = 0;
-$r = 0;
-
-$patterns = [
-	[4, 1],
-	[3, 3],
-	[3, 2],
-	[2, 2],
-	[2, 1],
-	[1, 2],
-	[1, 1]
+$cssTags = ex_css_tags(['css/performance-common.css', 'css/performance-longpage.css'], 'performance-longpage');
+$distTag = ex_dist_script_tag();
+$jsTags = ex_js_tags(['js/common', 'js/performance-common', 'js/performance-longpage'], 'performance-longpage');
+$phpPartials = [
+	__DIR__ . '/php/perf-config.php',
+	__DIR__ . '/php/perf-nav.php',
+	__DIR__ . '/php/perf-modal.php'
 ];
 
-while (count($boxes) < $targetBoxes || $r <= $maxRow) {
-	for ($c = 0; $c < $cols; $c++) {
-		if (!empty($occupied[$r][$c])) {
-			continue;
-		}
+ex_render_page(__FILE__, static function () use ($PERF_BENCHMARKS, $cssTags, $distTag, $jsTags): void {
+	$cols = 4;
+	$targetBoxes = 400;
+	$occupied = [];
+	$boxes = [];
+	$maxRow = 0;
+	$r = 0;
 
-		$maxW = 0;
-		while (($c + $maxW) < $cols && empty($occupied[$r][$c + $maxW])) {
-			$maxW++;
-		}
+	$patterns = [
+		[4, 1],
+		[3, 3],
+		[3, 2],
+		[2, 2],
+		[2, 1],
+		[1, 2],
+		[1, 1]
+	];
 
-		$w = 1;
-		$h = 1;
-		$remaining = $targetBoxes - count($boxes);
-
-		if ($remaining > 8) {
-			$hash = (($r * 31) + ($c * 17)) % 19;
-			$cand = null;
-			if ($hash === 0 && $maxW === 4) {
-				$cand = $patterns[0];
-			} elseif ($hash === 3 && $maxW >= 3) {
-				$cand = $patterns[1];
-			} elseif ($hash === 6 && $maxW >= 3) {
-				$cand = $patterns[2];
-			} elseif (($hash === 8 || $hash === 14) && $maxW >= 2) {
-				$cand = $patterns[3];
-			} elseif (($hash === 10 || $hash === 16) && $maxW >= 2) {
-				$cand = $patterns[4];
-			} elseif ($hash === 12 || $hash === 17) {
-				$cand = $patterns[5];
-			}
-
-			if ($cand !== null && $cand[0] <= $maxW) {
-				$w = $cand[0];
-				$h = $cand[1];
+	while (true) {
+		if (count($boxes) >= $targetBoxes) {
+			if ($r > $maxRow) {
+				break;
 			}
 		}
+		for ($c = 0; $c < $cols; $c++) {
+			if (!empty($occupied[$r][$c])) continue;
+			$maxW = 0;
+			while (($c + $maxW) < $cols && empty($occupied[$r][$c + $maxW])) $maxW++;
 
-		for ($dr = 0; $dr < $h; $dr++) {
-			for ($dc = 0; $dc < $w; $dc++) {
-				$occupied[$r + $dr][$c + $dc] = true;
+			$w = 1;
+			$h = 1;
+			$remaining = $targetBoxes - count($boxes);
+			if ($remaining > 8) {
+				$hash = (($r * 31) + ($c * 17)) % 19;
+				$cand = null;
+				if ($hash === 0 && $maxW === 4) $cand = $patterns[0];
+				elseif ($hash === 3 && $maxW >= 3) $cand = $patterns[1];
+				elseif ($hash === 6 && $maxW >= 3) $cand = $patterns[2];
+				elseif (in_array($hash, [8, 14], true) && $maxW >= 2) $cand = $patterns[3];
+				elseif (in_array($hash, [10, 16], true) && $maxW >= 2) $cand = $patterns[4];
+				elseif (in_array($hash, [12, 17], true)) $cand = $patterns[5];
+
+				if ($cand !== null && $cand[0] <= $maxW) {
+					$w = $cand[0];
+					$h = $cand[1];
+				}
 			}
-		}
-		if (($r + $h - 1) > $maxRow) {
-			$maxRow = $r + $h - 1;
-		}
 
-		$boxes[] = [
-			'w' => $w,
-			'h' => $h
-		];
+			for ($dr = 0; $dr < $h; $dr++) {
+				for ($dc = 0; $dc < $w; $dc++) $occupied[$r + $dr][$c + $dc] = true;
+			}
+			if (($r + $h - 1) > $maxRow) $maxRow = $r + $h - 1;
+			$boxes[] = ['w' => $w, 'h' => $h];
+		}
+		$r++;
 	}
-	$r++;
-}
 
-$totalBoxes = count($boxes);
-
-ob_start();
+	$totalBoxes = count($boxes);
+	$perfActiveId = 'longpage';
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>ipax-backdrop: Long Page 400 Boxes Benchmark</title>
-	<link rel="stylesheet" href="css/performance-longpage.css">
+	<?php echo $cssTags; ?>
 </head>
 <body>
 	<header class="pt-hud">
 		<div class="pt-hud-row">
-			<div data-perf-nav="host"></div>
+			<?php require __DIR__ . '/php/perf-nav.php'; ?>
 			<div class="pt-hud-stat">In viewport: <span data-pt-role="visible">0</span> / <span data-pt-role="total"><?php echo $totalBoxes; ?></span></div>
 			<div class="pt-hud-stat">Engine: <span data-pt-role="backend">init</span></div>
 			<div class="pt-hud-stat">Last 32 avg: <span data-pt-role="ms">0.0</span> ms</div>
@@ -139,7 +129,7 @@ ob_start();
 				</select>
 			</label>
 			<div class="pt-hud-controls">
-				<button type="button" class="pt-hud-btn pt-hud-btn-accent" data-perf-action="open-bg-modal">🖼️ Backgrounds (16)</button>
+				<button type="button" class="pt-hud-btn perf-btn-accent" data-perf-action="open-bg-modal">&#128444;&#65039; Backgrounds (16)</button>
 			</div>
 		</div>
 	</header>
@@ -158,50 +148,29 @@ ob_start();
 	</article>
 
 	<main class="pt-grid" data-pt-role="grid">
-		<?php foreach ($boxes as $i => $box): 
+		<?php foreach ($boxes as $i => $box):
 			$hPx = $box['h'] * 170 + ($box['h'] - 1) * 16;
 			$glassHPx = $hPx * 0.64;
-			$maxFs = max(16, ($glassHPx - 32) / 1.2); 
-			$randN = rand(0, 12);
-			$fs = min(16 * pow(1.1487, $randN), $maxFs);
-			$color = rand(0, 1) ? '#000000' : '#ffffff';
+			$maxFs = max(16, ($glassHPx - 32) / 1.2);
+			$fsTier = rand(0, 12);
+			while ($fsTier > 0 && (16 * pow(1.1487, $fsTier)) > $maxFs) {
+				$fsTier--;
+			}
+			$inkClass = rand(0, 1) ? 'pt-ink-dark' : 'pt-ink-light';
 		?>
-		<div class="pt-cell pt-w-<?php echo $box['w']; ?> pt-h-<?php echo $box['h']; ?> pt-bg-<?php echo ($i % 16); ?>" data-pt-cell="<?php echo $i; ?>">
-			<div class="pt-glass" data-ipax-backdrop style="--pt-color: <?php echo $color; ?>; --pt-fs: <?php echo round($fs, 1); ?>px;">
+		<div class="pt-cell pt-w-<?php echo $box['w']; ?> pt-h-<?php echo $box['h']; ?>" data-pt-cell="<?php echo $i; ?>">
+			<div class="pt-glass <?php echo $inkClass; ?> pt-fs-<?php echo $fsTier; ?>" data-ipax-backdrop>
 				<div class="pt-content">Box <?php echo $i; ?> <small>(<?php echo $box['w']; ?>&times;<?php echo $box['h']; ?>)</small></div>
 			</div>
 		</div>
 		<?php endforeach; ?>
 	</main>
 
-	<dialog class="perf-modal" data-perf-modal="bg">
-		<div class="perf-modal-card">
-			<header class="perf-modal-head">
-				<h2 class="perf-modal-title">Background Image Pool</h2>
-				<button type="button" class="perf-modal-close" data-perf-action="pool-close" aria-label="Close">&times;</button>
-			</header>
-			<div class="perf-modal-toolbar">
-				<button type="button" class="perf-modal-btn" data-perf-action="pool-random">🎲 Generate Random</button>
-				<label class="perf-modal-btn perf-modal-btn-primary perf-modal-upload">
-					<span>📁 Load Local Images&hellip;</span>
-					<input type="file" accept="image/*" multiple data-perf-control="pool-files">
-				</label>
-				<span class="perf-modal-meta" data-perf-role="pool-summary">0 images</span>
-			</div>
-			<div class="perf-modal-drop" data-perf-role="pool-drop">
-				Drop image files here or use <strong>📁 Load Local Images</strong> to test real photography.
-			</div>
-			<div class="perf-modal-grid" data-perf-role="pool-grid"></div>
-		</div>
-	</dialog>
+	<?php require __DIR__ . '/php/perf-modal.php'; ?>
 
-	<script src="../dist/ipax-backdrop.min.js"></script>
-	<script src="js/example-images.js"></script>
-	<script src="js/performance-common.js"></script>
-	<script src="js/performance-longpage.js"></script>
+	<?php echo $distTag; ?>
+	<?php echo $jsTags; ?>
 </body>
 </html>
 <?php
-$content = ob_get_clean();
-file_put_contents($htmlFile, $content);
-echo $content;
+}, $phpPartials);

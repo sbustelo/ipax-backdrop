@@ -1,0 +1,301 @@
+<?php
+// PATH: examples/index.php
+require_once __DIR__ . '/php/ex-bootstrap.php';
+
+$cssTags = ex_css_tags(['css/index-example.css'], 'index');
+$distTag = ex_dist_script_tag();
+$jsTags = ex_js_tags(['js/common', 'js/index'], 'index');
+
+ex_render_page(__FILE__, static function () use ($cssTags, $distTag, $jsTags): void {
+?><!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<title>ipax-backdrop: Lucid Glass example</title>
+	<?php echo $cssTags; ?>
+</head>
+
+<body>
+	<main class="ex-page" data-ex-ref="root">
+		<header class="ex-hero" data-ex-ref="hero">
+			<fieldset class="ex-hero-header" aria-label="Effect">
+				<div class="ex-hero-legend">EFFECT</div>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="lucid" data-ex-ctl="effect-mode" checked>
+					<span>Lucid Glass</span>
+				</label>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="overlays" data-ex-ctl="effect-mode">
+					<span>Overlays, gradients &amp; text-shadows</span>
+				</label>
+				<label class="ex-radio-opt">
+					<input type="radio" name="ex-effect-mode" value="none" data-ex-ctl="effect-mode">
+					<span>None</span>
+				</label>
+			</fieldset>
+
+			<h1 class="example-title" data-ex-label="Title" data-ipax-backdrop data-ipax-text>
+				Lucid Glass
+			</h1>
+			<div class="example-hero-block" data-ipax-backdrop>
+				<p>
+					A vanilla JavaScript &amp; WebGL backdrop-filter to get
+					<strong>legible text over any picture,</strong> without
+					<strong class="ex-highlight-cyan">flat overlays or dark gradients.</strong>
+				</p>
+			</div>
+		</header>
+
+		<h2>IPAX-backdrop <span class="ex-subtitle-regular">with linear blur &amp; glyph contour</span></h2>
+
+		<p class="destacado">Corrects whatever is behind an element to <strong>guarantee WCAG 2 contrast.</strong></p>
+
+		<p>The engine adjusts the lightness (L&nbsp;in OKLab) of the picture's pixels underneath the text, just as necessary to hit the target ratio. Blur and a feather mask can be applied. Setting the contrast to <code>1</code> turns the engine into a pure linear blur utility.</p>
+
+		<p>The text boxes above are plain <code>HTML</code> elements driven by <code>--ipax-backdrop</code> and <code>--ipax-text</code> CSS properties.</p>
+
+		<p><a href="https://github.com/sbustelo/ipax-backdrop" target="_blank" rel="noopener">Source and documentation on GitHub &raquo;</a></p>
+
+		<h2>Experiment</h2>
+
+		<p class="destacado">Drag any box and resize it from its bottom-right corner. <strong>Box A</strong> and <strong>Box B</strong> use <code>--ipax-backdrop</code>; <strong>Box C</strong> uses standalone <code>--ipax-text</code>; the others are test backdrops.</p>
+
+		<p>The primary goal is ensuring legible text over photos. To do this <em>without asking for screen-capture permissions</em>, the engine must rebuild the background by extracting only images and solid colors, ignoring other DOM content.</p>
+
+		<p>To keep the solution fast and robust, anything that cannot be safely redrawn (like CSS gradients or transformed elements) gets covered by a translucent veil, applying the flat tone needed to guarantee contrast against the worst possible background.</p>
+
+		<div class="ex-stage" data-ex-ref="stage">
+			<div class="ex-stage-label">Stage background</div>
+
+			<div class="ex-box ex-picture" data-ex-box data-ex-noraise data-ex-x="6" data-ex-y="40" data-ex-w="310" data-ex-h="290" data-ex-z="1" data-ex-img="a">
+				<div class="ex-t ex-pic-label">Picture 1</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box ex-picture ex-photo1" data-ex-box data-ex-noraise data-ex-x="130" data-ex-y="60" data-ex-w="400" data-ex-h="270" data-ex-z="2" data-ex-img="b">
+				<div class="ex-t ex-pic-label">Picture 2</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box ex-flat" data-ex-box data-ex-x="30" data-ex-y="230" data-ex-w="200" data-ex-h="120" data-ex-z="3">
+				<div class="ex-t">
+					<strong>Flat color</strong><br>
+					<small>Standard rgba() backgrounds are fully supported and corrected</small>
+				</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box ex-grad" data-ex-box data-ex-x="200" data-ex-y="300" data-ex-w="180" data-ex-h="100" data-ex-z="4">
+				<div class="ex-t">
+					<strong>Gradient</strong><br>
+					<small>CSS gradients cannot be redrawn. They get a contrast veil instead.</small>
+				</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box ex-rot" data-ex-box data-ex-x="500" data-ex-y="80" data-ex-w="160" data-ex-h="110" data-ex-z="5">
+				<div class="ex-t">
+					<strong>Rotated</strong><br>
+					<small>Transformed elements are hard to track. They get a contrast veil instead.</small>
+				</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box" data-ex-box data-ex-label="Box A" data-ex-x="30" data-ex-y="100" data-ex-w="200" data-ex-h="100" data-ex-z="6">
+				<span class="ex-box-tag">Box A</span>
+				<div class="ex-glass" data-ipax-backdrop><span>Light</span>&nbsp;<span class="ex-k">and dark</span></div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box" data-ex-box data-ex-label="Box B" data-ex-x="300" data-ex-y="230" data-ex-w="310" data-ex-h="120" data-ex-z="7">
+				<span class="ex-box-tag">Box B</span>
+				<div class="ex-glass ex-custom-text" data-ipax-backdrop>Custom color</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+
+			<div class="ex-box ex-text-only-box" data-ex-box data-ex-label="Box C" data-ex-x="230" data-ex-y="40" data-ex-w="320" data-ex-h="110" data-ex-z="8">
+				<span class="ex-box-tag">Box C</span>
+				<div class="ex-text-only" data-ipax-text>Glyph contour only (--ipax-text)</div>
+				<span class="ex-grip" data-ex-grip></span>
+			</div>
+		</div>
+
+		<p class="ex-report" data-ex-ref="report"></p>
+		<p class="ex-report" data-ex-ref="status"></p>
+
+		<label class="ex-row"><span>Mode <sup>1</sup></span>
+			<select data-ex-ctl="mode">
+				<option value="default">default</option>
+				<option value="tricontrast">tricontrast</option>
+			</select>
+		</label>
+
+		<label class="ex-row">
+			<span>Contrast (WCAG ratio) <sup>2</sup> <small class="ex-hint">Set to <code>1</code> to bypass lightness adaptation</small></span>
+			<span class="ex-pair">
+				<input type="range" data-ex-ctl="contrast" min="1" max="15" step="0.5" value="4.5">
+				<input type="number" data-ex-ctl="contrast" min="1" max="15" step="0.5" value="4.5">
+			</span>
+		</label>
+
+		<details class="ex-disclosure">
+			<summary class="ex-summary">
+				<div class="ex-row">
+					<span>Feather (px) <small class="ex-hint">(expand TRBL)</small></span>
+					<span class="ex-pair" data-ex-stop-summary>
+						<input type="range" data-ex-ctl="feather" min="0" max="40" step="1" value="14">
+						<input type="number" data-ex-ctl="feather" min="0" max="40" step="1" value="14">
+					</span>
+				</div>
+			</summary>
+			<div class="ex-disclosure-body">
+				<label class="ex-row">
+					<span>Top</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="feather-top" min="0" max="40" step="1" value="14">
+						<input type="number" data-ex-ctl="feather-top" min="0" max="40" step="1" value="14">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Right</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="feather-right" min="0" max="40" step="1" value="14">
+						<input type="number" data-ex-ctl="feather-right" min="0" max="40" step="1" value="14">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Bottom</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="feather-bottom" min="0" max="40" step="1" value="14">
+						<input type="number" data-ex-ctl="feather-bottom" min="0" max="40" step="1" value="14">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Left</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="feather-left" min="0" max="40" step="1" value="14">
+						<input type="number" data-ex-ctl="feather-left" min="0" max="40" step="1" value="14">
+					</span>
+				</label>
+			</div>
+		</details>
+
+		<label class="ex-row">
+			<span>Element blur (px) <sup>3</sup></span>
+			<span class="ex-pair">
+				<input type="range" data-ex-ctl="blur" min="0" max="16" step="1" value="4">
+				<input type="number" data-ex-ctl="blur" min="0" max="16" step="1" value="4">
+			</span>
+		</label>
+
+		<details class="ex-disclosure" open>
+			<summary class="ex-summary">
+				<div class="ex-row">
+					<span>Glyph contour (--ipax-text) <small class="ex-hint">(Box C)</small></span>
+					<span></span>
+				</div>
+			</summary>
+			<div class="ex-disclosure-body">
+				<label class="ex-row">
+					<span>Text contrast (WCAG ratio)</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="text-contrast" min="1" max="15" step="0.5" value="7">
+						<input type="number" data-ex-ctl="text-contrast" min="1" max="15" step="0.5" value="7">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Halo radius (px)</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="text-halo" min="0" max="32" step="1" value="12">
+						<input type="number" data-ex-ctl="text-halo" min="0" max="32" step="1" value="12">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Spread (%)</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="text-spread" min="0" max="100" step="1" value="35">
+						<input type="number" data-ex-ctl="text-spread" min="0" max="100" step="1" value="35">
+					</span>
+				</label>
+				<label class="ex-row">
+					<span>Glyph background blur (px)</span>
+					<span class="ex-pair">
+						<input type="range" data-ex-ctl="text-blur" min="0" max="24" step="1" value="6">
+						<input type="number" data-ex-ctl="text-blur" min="0" max="24" step="1" value="6">
+					</span>
+				</label>
+			</div>
+		</details>
+
+		<label class="ex-row">
+			<span>Text color (Box B)</span>
+			<input type="color" data-ex-ctl="textcolor" value="#ffd54a" class="ex-color-end">
+		</label>
+
+		<label class="ex-row">
+			<span>Backend</span>
+			<select data-ex-ctl="backend">
+				<option value="auto">auto</option>
+				<option value="webgl">webgl</option>
+				<option value="cpu">cpu</option>
+			</select>
+		</label>
+
+		<label class="ex-row">
+			<span>Author overlay (plain CSS)</span>
+			<input type="checkbox" data-ex-ctl="overlay">
+		</label>
+
+		<label class="ex-row">
+			<span>Author gradient (plain CSS)</span>
+			<input type="checkbox" data-ex-ctl="grad">
+		</label>
+
+		<label class="ex-row">
+			<span>Show effect on Stage elements</span>
+			<input type="checkbox" class="ex-switch" data-ex-ctl="effect-stage" checked>
+		</label>
+
+		<div class="ex-row">
+			<label for="ex-img-target-select">Upload image to...</label>
+			<select id="ex-img-target-select" data-ex-ctl="imgTarget">
+				<option value="" selected disabled>Select target...</option>
+				<option value="a">Picture 1</option>
+				<option value="b">Picture 2</option>
+				<option value="stage">Stage background</option>
+				<option disabled>──────────</option>
+				<option value="hero">Page hero</option>
+			</select>
+			<input type="file" data-ex-ref="file" accept="image/*" hidden>
+		</div>
+
+		<p class="ex-small">
+			1. <strong>Tricontrast</strong> keeps the backdrop inside the band where white and black text both reach the ratio.
+			<a href="https://medium.com/santiago-bustelo-in-english/tricontrast-the-swiss-school-with-wcag-accessibility-a5da3d9ae9fd#:~:text=monochromatic%20Tricontrast%20space" target="_blank" rel="noopener">It only exists up to 4.5:1</a>, where monochromatic options narrow just to <code>#757575</code> and <code>#767676</code>, flattening the picture's luminosity into a near-uniform field.
+		</p>
+
+		<p class="ex-small">
+			2. <strong>APCA contrast (<code>Lc</code> or values &gt; 15)</strong> emits a warning and falls back to an equivalent WCAG 2 ratio (capped at 15:1) until native APCA licensing is enabled.
+		</p>
+
+		<p class="ex-small">
+			3. <strong>WCAG is defined for text over a plain color;</strong> it says nothing about how the formula should be adjusted for text over a picture. In my experiments, image detail "fights" the legibility of the text: without blur, it's better to raise the contrast to the next tier (from 3 to 4.5, and from 4.5 to 7). A blurred backdrop moves the image closer to the flat-field case the model measures, so the reported ratio becomes a more meaningful predictor of legibility.<br>
+			<em>&mdash; Santiago Bustelo</em>
+		</p>
+
+		<hr class="ex-divider">
+
+		<p class="ex-small">
+			IPAX-backdrop v0.1.13 &bull; November 2026. Part of the <a href="https://ipax.bustelo.com.ar/">IPAX System</a>.
+		</p>
+	</main>
+
+	<?php echo $distTag; ?>
+	<?php echo $jsTags; ?>
+</body>
+
+</html>
+<?php
+});

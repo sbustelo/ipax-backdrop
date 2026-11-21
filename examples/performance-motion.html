@@ -4,13 +4,17 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 	<title>ipax-backdrop &amp; ipax-text: Motion &amp; Dynamic Presets Benchmark</title>
-	<link rel="stylesheet" href="css/performance-motion.css">
-</head>
+	<link rel="stylesheet" href="css/performance-motion.min.css?v=1795239214"></head>
 <body>
 	<header class="dyn-hud">
 		<div class="dyn-hud-metrics">
-			<div data-perf-nav="host"></div>
-			<div class="dyn-stat">rAF FPS: <strong data-dyn-role="raf-fps">0</strong></div>
+			<label class="perf-nav" data-perf-nav>
+	<span class="perf-nav-label">Test:</span>
+	<select class="perf-nav-select" data-perf-control="benchmark-nav" aria-label="Select performance benchmark">
+				<option value="performance-longpage.html">Long Page (400 Boxes)</option>
+				<option value="performance-motion.html" selected>Motion &amp; Presets</option>
+			</select>
+</label>			<div class="dyn-stat">rAF FPS: <strong data-dyn-role="raf-fps">0</strong></div>
 			<div class="dyn-stat">Frame: <strong data-dyn-role="raf-ms">0.0</strong> ms</div>
 			<div class="dyn-stat">Avg render: <strong data-dyn-role="render-ms">0.0</strong> ms</div>
 			<div class="dyn-stat">Engine: <strong data-dyn-role="backend">init</strong></div>
@@ -127,7 +131,7 @@
 						<input type="checkbox" data-dyn-control="wl-bg-pan" checked>
 						<span>Continuous Background Pan</span>
 					</label>
-					<button type="button" class="dyn-btn dyn-btn-accent" data-perf-action="open-bg-modal">🖼️ Backgrounds (10)</button>
+					<button type="button" class="dyn-btn perf-btn-accent" data-perf-action="open-bg-modal">&#128444;&#65039; Backgrounds (10)</button>
 				</div>
 
 				<div class="dyn-workload-row">
@@ -181,7 +185,7 @@
 				<div class="dyn-stage-bg" data-dyn-role="stage-bg-1"></div>
 				<div class="dyn-stage-bg" data-dyn-role="stage-bg-2"></div>
 
-				<article class="dyn-box" data-dyn-box="0" data-dyn-slot="0" data-dyn-case="0" data-ipax-backdrop data-ipax-text>
+				<article class="dyn-box" data-dyn-box="0" data-dyn-slot="0" data-dyn-case="0" data-dyn-preset="high" data-ipax-backdrop data-ipax-text>
 					<header class="dyn-box-head">
 						<select class="dyn-box-preset" data-dyn-box-preset="0" aria-label="Box 1 preset">
 							<option value="high" selected>High Quality</option>
@@ -194,12 +198,12 @@
 					</header>
 					<h3 class="dyn-box-title" data-dyn-box-title="0">Editorial Card Overlay</h3>
 					<p class="dyn-box-copy" data-dyn-box-copy="0">
-						Combines container contrast with <span class="dyn-accent">7:1 glyph halos</span> for multi-color body copy.
+						<span data-dyn-role="copy-head">Combines container contrast with </span><span class="dyn-accent" data-dyn-role="copy-accent">7:1 glyph halos</span><span data-dyn-role="copy-tail"> for multi-color body copy.</span>
 					</p>
 					<footer class="dyn-box-telemetry" data-dyn-box-stats="0">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
 				</article>
 
-				<article class="dyn-box" data-dyn-box="1" data-dyn-slot="1" data-dyn-case="1" data-ipax-backdrop data-ipax-text>
+				<article class="dyn-box" data-dyn-box="1" data-dyn-slot="1" data-dyn-case="1" data-dyn-preset="balanced" data-ipax-backdrop data-ipax-text>
 					<header class="dyn-box-head">
 						<select class="dyn-box-preset" data-dyn-box-preset="1" aria-label="Box 2 preset">
 							<option value="high">High Quality</option>
@@ -212,12 +216,12 @@
 					</header>
 					<h3 class="dyn-box-title" data-dyn-box-title="1">Standalone Photo Headline</h3>
 					<p class="dyn-box-copy" data-dyn-box-copy="1">
-						Protects individual letterforms directly over imagery with <span class="dyn-accent">zero container veil</span>.
+						<span data-dyn-role="copy-head">Protects individual letterforms directly over imagery with </span><span class="dyn-accent" data-dyn-role="copy-accent">zero container veil</span><span data-dyn-role="copy-tail">.</span>
 					</p>
 					<footer class="dyn-box-telemetry" data-dyn-box-stats="1">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
 				</article>
 
-				<article class="dyn-box" data-dyn-box="2" data-dyn-slot="2" data-dyn-case="2" data-ipax-backdrop data-ipax-text>
+				<article class="dyn-box" data-dyn-box="2" data-dyn-slot="2" data-dyn-case="2" data-dyn-preset="fast" data-ipax-backdrop data-ipax-text>
 					<header class="dyn-box-head">
 						<select class="dyn-box-preset" data-dyn-box-preset="2" aria-label="Box 3 preset">
 							<option value="high">High Quality</option>
@@ -230,12 +234,12 @@
 					</header>
 					<h3 class="dyn-box-title" data-dyn-box-title="2">White Title + Dark Copy</h3>
 					<p class="dyn-box-copy" data-dyn-box-copy="2">
-						Dual-polarity solver clamps the backdrop so light and dark text share 4.5:1 simultaneously.
+						<span data-dyn-role="copy-head">Dual-polarity solver clamps the backdrop so light and dark text share 4.5:1 simultaneously.</span><span class="dyn-accent" data-dyn-role="copy-accent"></span><span data-dyn-role="copy-tail"></span>
 					</p>
 					<footer class="dyn-box-telemetry" data-dyn-box-stats="2">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
 				</article>
 
-				<article class="dyn-box" data-dyn-box="3" data-dyn-slot="3" data-dyn-case="3" data-ipax-backdrop data-ipax-text>
+				<article class="dyn-box" data-dyn-box="3" data-dyn-slot="3" data-dyn-case="3" data-dyn-preset="cpu" data-ipax-backdrop data-ipax-text>
 					<header class="dyn-box-head">
 						<select class="dyn-box-preset" data-dyn-box-preset="3" aria-label="Box 4 preset">
 							<option value="high">High Quality</option>
@@ -248,7 +252,7 @@
 					</header>
 					<h3 class="dyn-box-title" data-dyn-box-title="3">Frosted Blur + Glyph Solver</h3>
 					<p class="dyn-box-copy" data-dyn-box-copy="3">
-						Container runs pure spatial blur while <span class="dyn-accent">OKLab text solver</span> locks 7:1 contrast.
+						<span data-dyn-role="copy-head">Container runs pure spatial blur while </span><span class="dyn-accent" data-dyn-role="copy-accent">OKLab text solver</span><span data-dyn-role="copy-tail"> locks 7:1 contrast.</span>
 					</p>
 					<footer class="dyn-box-telemetry" data-dyn-box-stats="3">0.0 ms &bull; 0&times;0 &bull; 1.00x</footer>
 				</article>
@@ -257,30 +261,30 @@
 	</main>
 
 	<dialog class="perf-modal" data-perf-modal="bg">
-		<div class="perf-modal-card">
-			<header class="perf-modal-head">
-				<h2 class="perf-modal-title">Background Image Pool</h2>
-				<button type="button" class="perf-modal-close" data-perf-action="pool-close" aria-label="Close">&times;</button>
-			</header>
-			<div class="perf-modal-toolbar">
-				<button type="button" class="perf-modal-btn" data-perf-action="pool-random">🎲 Generate Random</button>
-				<label class="perf-modal-btn perf-modal-btn-primary perf-modal-upload">
-					<span>📁 Load Local Images&hellip;</span>
-					<input type="file" accept="image/*" multiple data-perf-control="pool-files">
-				</label>
-				<span class="perf-modal-meta" data-perf-role="pool-summary">0 images</span>
-			</div>
-			<div class="perf-modal-drop" data-perf-role="pool-drop">
-				Drop image files here or use <strong>📁 Load Local Images</strong> to test real photography.
-			</div>
-			<div class="perf-modal-grid" data-perf-role="pool-grid"></div>
+	<div class="perf-modal-card">
+		<header class="perf-modal-head">
+			<h2 class="perf-modal-title">Background Image Pool</h2>
+			<button type="button" class="perf-modal-close" data-perf-action="pool-close" aria-label="Close">&times;</button>
+		</header>
+		<div class="perf-modal-toolbar">
+			<button type="button" class="perf-modal-btn" data-perf-action="pool-random">&#127922; Generate Random</button>
+			<label class="perf-modal-btn perf-modal-btn-primary perf-modal-upload">
+				<span>&#128193; Load Local Images&hellip;</span>
+				<input type="file" accept="image/*" multiple data-perf-control="pool-files">
+			</label>
+			<span class="perf-modal-meta" data-perf-role="pool-summary">0 images</span>
 		</div>
-	</dialog>
-
-	<script src="../dist/ipax-backdrop.min.js"></script>
-	<script src="js/editor-presets.js"></script>
-	<script src="js/example-images.js"></script>
-	<script src="js/performance-common.js"></script>
-	<script src="js/performance-motion.js"></script>
-</body>
+		<div class="perf-modal-drop" data-perf-role="pool-drop">
+			Drop image files here or use <strong>&#128193; Load Local Images</strong> to test real photography.
+		</div>
+		<div class="perf-modal-grid" data-perf-role="pool-grid"></div>
+	</div>
+	<template data-perf-tpl="pool-item">
+		<div class="perf-modal-item">
+			<img src="" alt="" loading="lazy">
+			<button type="button" class="perf-modal-rm" data-perf-remove="" aria-label="Remove image">&times;</button>
+		</div>
+	</template>
+</dialog>
+	<script src="../dist/ipax-backdrop.min.js?v=1795237606"></script>	<script src="js/performance-motion.min.js?v=1795239895"></script></body>
 </html>

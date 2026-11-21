@@ -1,4 +1,3 @@
-<!-- PATH: examples/editor.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,42 +5,29 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Lucid Glass Editor — ipax-backdrop</title>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0">
-	<!-- Módulos CSS Atómicos -->
-	<link rel="stylesheet" href="css/editor-layout.css?v=0.1.10b">
-	<link rel="stylesheet" href="css/editor-controls.css?v=0.1.10d">
-	<link rel="stylesheet" href="css/editor-combo.css?v=0.1.10b">
-	<link rel="stylesheet" href="css/editor-stage.css?v=0.1.10b">
-</head>
+	<link rel="stylesheet" href="css/editor.min.css?v=1795239181"></head>
 <body>
 	<div class="ed-app" data-ed-app>
-		<!-- LEFT COLUMN: FULL-BLEED CANVAS STAGE -->
 		<main class="ed-workspace" data-ed-role="workspace">
 			<div class="ed-stage" data-ed-role="stage">
 				<div class="ed-stage-bg" data-ed-role="stage-bg"></div>
 			</div>
 		</main>
 
-		<!-- RIGHT COLUMN: COMPACT ADOBE-STYLE INSPECTOR -->
 		<aside class="ed-inspector" data-ed-role="inspector">
 			<header class="ed-inspector-top">
 				<h1 class="ed-app-title">Lucid Glass editor</h1>
 				<div class="ed-top-actions">
 					<button type="button" class="ed-btn ed-btn-primary" data-ed-action="new-box" data-ed-tip="Create new text box">+ New box</button>
 					<button type="button" class="ed-btn-icon" data-ed-action="delete-box" data-ed-tip="Delete selected box" disabled>
-						<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-							<path d="M2.5 4h11M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5"/>
-						</svg>
+						<span class="ed-ico material-symbols-outlined" aria-hidden="true">delete</span>
 					</button>
 					<button type="button" class="ed-btn-icon is-active" data-ed-action="toggle-effect" data-ed-tip="Toggle Lucid Glass effect" aria-pressed="true">
-						<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-							<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/>
-							<circle cx="8" cy="8" r="2"/>
-						</svg>
+						<span class="ed-ico material-symbols-outlined" aria-hidden="true">visibility</span>
 					</button>
 				</div>
 			</header>
 
-			<!-- PANEL: PROJECT / EXPORT (Visible only when Stage is selected) -->
 			<section class="ed-panel" data-ed-panel="project">
 				<header class="ed-panel-header">
 					<span>Project / Export</span>
@@ -60,7 +46,6 @@
 				</div>
 			</section>
 
-			<!-- PANEL: UNIFIED CONTEXTUAL BACKGROUND -->
 			<section class="ed-panel" data-ed-panel="background">
 				<header class="ed-panel-header">
 					<span>Background</span>
@@ -78,7 +63,6 @@
 						</select>
 					</label>
 
-					<!-- TYPE: IMAGE -->
 					<div class="ed-sub-group" data-ed-subpanel="bg-image" hidden>
 						<div class="ed-img-preview" data-ed-action="pick-bg-image" role="button" tabindex="0">
 							<span class="ed-img-text">Drag image or click to change</span>
@@ -101,7 +85,6 @@
 						<button type="button" class="ed-btn ed-btn-full" data-ed-action="delete-bg" disabled>Delete background</button>
 					</div>
 
-					<!-- TYPE: SOLID COLOR -->
 					<div class="ed-sub-group" data-ed-subpanel="bg-color" hidden>
 						<label class="ed-prop">
 							<span class="ed-label">Color</span>
@@ -114,7 +97,6 @@
 						</label>
 					</div>
 
-					<!-- TYPE: GRADIENT -->
 					<div class="ed-sub-group" data-ed-subpanel="bg-gradient" hidden>
 						<div class="ed-prop">
 							<span class="ed-label">Start</span>
@@ -137,7 +119,6 @@
 				</div>
 			</section>
 
-			<!-- PANEL: PERFORMANCE (Visible only when Stage is selected) -->
 			<section class="ed-panel" data-ed-panel="performance">
 				<header class="ed-panel-header">
 					<span>Performance</span>
@@ -150,6 +131,7 @@
 							<option value="high">High Quality</option>
 							<option value="balanced">Balanced</option>
 							<option value="fast">Fast</option>
+							<option value="cpu">CPU Fallback</option>
 							<option value="custom">Custom</option>
 						</select>
 					</label>
@@ -170,9 +152,7 @@
 				</div>
 			</section>
 
-			<!-- CONTEXTUAL BOX PANELS -->
 			<div data-ed-role="box-panels" hidden>
-				<!-- PANEL: POSITION (1st contextual block, single row) -->
 				<section class="ed-panel" data-ed-panel="position">
 					<header class="ed-panel-header">
 						<span>Position</span>
@@ -200,7 +180,6 @@
 					</div>
 				</section>
 
-				<!-- PANEL: CHARACTER -->
 				<section class="ed-panel" data-ed-panel="character">
 					<header class="ed-panel-header">
 						<span>Character</span>
@@ -215,7 +194,6 @@
 								<ul class="ed-combo-menu" data-ed-role="font-menu" hidden></ul>
 							</div>
 							<span class="ed-ico material-symbols-outlined ed-font-status-ico" data-ed-role="font-status-icon" data-ed-tip="System font stack">computer</span>
-							<span class="ed-font-status" data-ed-role="font-status" hidden>System font stack</span>
 						</div>
 
 						<div class="ed-grid-3">
@@ -253,9 +231,8 @@
 							</div>
 						</div>
 
-						<!-- PADDING MASTER + SINGLE-LINE TRBL -->
 						<div class="ed-prop ed-mt-xs">
-							<button type="button" class="ed-disclosure" data-ed-action="toggle-padding" aria-expanded="false" aria-label="Expand Padding TRBL">&#9656;</button>
+							<button type="button" class="ed-disclosure" data-ed-action="toggle-padding" aria-expanded="false" aria-label="Expand Padding TRBL">&#9662;</button>
 							<span class="ed-ico material-symbols-outlined ed-scrub" data-ed-scrub="box-padding" data-ed-tip="Padding (px)">padding</span>
 							<input type="range" min="0" max="128" step="1" value="24" data-ed-control="box-padding">
 							<input type="number" min="0" max="128" step="1" value="24" data-ed-num="box-padding">
@@ -271,7 +248,6 @@
 					</div>
 				</section>
 
-				<!-- PANEL: LUCID GLASS (--ipax-backdrop & --ipax-text) -->
 				<section class="ed-panel" data-ed-panel="ipax">
 					<header class="ed-panel-header">
 						<span>Lucid Glass</span>
@@ -286,7 +262,6 @@
 							</select>
 						</label>
 
-						<!-- SUBSECTION 1: CONTAINER (--ipax-backdrop) -->
 						<div class="ed-sub-group" data-ed-subgroup="ipax-box">
 							<div class="ed-sub-header">
 								<label class="ed-sub-toggle">
@@ -309,9 +284,8 @@
 									</label>
 								</div>
 
-								<!-- FEATHER MASTER + SINGLE-LINE TRBL -->
 								<div class="ed-prop">
-									<button type="button" class="ed-disclosure" data-ed-action="toggle-feather" aria-expanded="false" aria-label="Expand Feather TRBL">&#9656;</button>
+									<button type="button" class="ed-disclosure" data-ed-action="toggle-feather" aria-expanded="false" aria-label="Expand Feather TRBL">&#9662;</button>
 									<span class="ed-ico material-symbols-outlined ed-scrub" data-ed-scrub="ipax-feather" data-ed-tip="Feather (px)">vignette</span>
 									<input type="range" min="0" max="128" step="1" value="14" data-ed-control="ipax-feather">
 									<input type="number" min="0" max="128" step="1" value="14" data-ed-num="ipax-feather">
@@ -327,7 +301,6 @@
 							</div>
 						</div>
 
-						<!-- SUBSECTION 2: GLYPH CONTOUR (--ipax-text) -->
 						<div class="ed-sub-group is-disabled" data-ed-subgroup="ipax-text">
 							<div class="ed-sub-header">
 								<label class="ed-sub-toggle">
@@ -378,12 +351,12 @@
 
 			<div class="ed-inspector-bottom">
 				<a href="https://www.bustelo.com.ar/en/" target="_blank" rel="noopener" class="ed-btn ed-btn-link ed-by">
-					v.0.1.10 • 2026, Santiago Bustelo
+					v.0.1.13 &bull; 2026, Santiago Bustelo
 				</a>
 				<div class="ed-telemetry-bar" data-ed-role="perf-telemetry">Engine: initializing...</div>
 				<footer class="ed-inspector-footer" data-ed-role="storage-footer">
-					<span class="ed-storage-status" data-ed-role="storage-status">Clean state (IndexedDB: 0 bytes)</span>
-					<button type="button" class="ed-btn ed-btn-xs" data-ed-action="purge-db" title="Purge IndexedDB auto-saved state">Purge</button>
+					<span class="ed-storage-status" data-ed-role="storage-status">Clean state (VFS: 0 bytes)</span>
+					<button type="button" class="ed-btn ed-btn-xs" data-ed-action="purge-db" data-ed-tip="Purge VFS auto-saved state">Purge</button>
 				</footer>
 			</div>
 		</aside>
@@ -391,20 +364,29 @@
 
 	<div class="ed-tooltip" data-ed-role="tooltip" hidden></div>
 
-	<!-- Core Engine & Editor Modules -->
-	<script src="../dist/ipax-backdrop.min.js"></script>
-	<script src="js/editor-bus.js"></script>
-	<script src="js/editor-presets.js"></script>
-	<script src="js/editor-zip.js"></script>
-	<script src="js/editor-idb.js"></script>
-	<script src="js/editor-serializer.js"></script>
-	<script src="js/editor-export-png.js"></script>
-	<script src="js/editor-storage.js"></script>
-	<script src="js/editor-performance.js"></script>
-	<script src="js/editor-background.js"></script>
-	<script src="js/editor-boxes.js?v=0.1.10b"></script>
-	<script src="js/editor-fonts.js?v=0.1.10b"></script>
-	<script src="js/editor-richtext.js?v=0.1.10b"></script>
-	<script src="js/editor-inspector.js?v=0.1.10d"></script>
-</body>
+	<template data-ed-tpl="box">
+		<div class="ed-box">
+			<div class="ed-glass" data-ipax-backdrop data-ipax-text>
+				<div class="ed-box-bg"></div>
+				<div class="ed-box-text" contenteditable="true"></div>
+			</div>
+			<span class="ed-handle" data-dir="nw"></span>
+			<span class="ed-handle" data-dir="n"></span>
+			<span class="ed-handle" data-dir="ne"></span>
+			<span class="ed-handle" data-dir="e"></span>
+			<span class="ed-handle" data-dir="se"></span>
+			<span class="ed-handle" data-dir="s"></span>
+			<span class="ed-handle" data-dir="sw"></span>
+			<span class="ed-handle" data-dir="w"></span>
+		</div>
+	</template>
+
+	<template data-ed-tpl="font-item">
+		<li class="ed-combo-item">
+			<span data-ed-role="font-label"></span>
+			<span class="ed-combo-tag" data-ed-role="font-tag"></span>
+		</li>
+	</template>
+
+	<script src="../dist/ipax-backdrop.min.js?v=1795237606"></script>	<script src="js/editor.min.js?v=1795239881"></script></body>
 </html>

@@ -1,9 +1,24 @@
 # Changelog
 
+## 0.1.13 • 21/nov/2026
+
+- **Unified `j0` architecture, static HTML export, and single-bundle assets (`examples/`, `tooling/`):**
+  - Adopted the `j0` framework (`j0/api.php`) across tooling and examples to unify event handling (`j0.bus`), service lookup (`j0.registry`), and client storage (`j0.vfs`) under one shared architecture, removing custom event buses, globals, and bespoke IndexedDB code.
+  - Each `.php` example now exports an up-to-date sibling `.html` file whenever any PHP, JS, or CSS source changes, so anyone downloading the repository can open and run the examples directly without a PHP server.
+  - Page scripts and styles are automatically concatenated and minified into a single `.min.js` and `.min.css` per example (`?debug=1` bypasses the cache and serves individual unminified files).
+  - Uploaded images in the Lucid Glass editor are stored in `j0.vfs` and deduplicated by SHA-256 hash, pruning unused blobs on save and reset.
+- **Examples and benchmarks technical debt cleanup:**
+  - Replaced prototype shortcuts across the editor and benchmarks with declarative `<template>` cloning, CSS custom properties, and `data-*` hooks.
+- **Free `z-index` interleaving and nested glass backgrounds:**
+  - Managed backdrop layers are now placed directly before their own wrapper instead of inside a single shared container, allowing glass boxes and normal page elements to interleave at any `z-index`.
+  - Stacked glass boxes now capture the internal background of lower glass boxes instead of cutting through to the page background, and raising a box in `z-index` clears stale backdrop footprints underneath.
+- **Headless unit test blur coverage:**
+  - Added 2D `drawImage()` resampling to the Node canvas harness (`tests/unit.js`) so adaptive downsampled blur (`sigma >= 4`) passes without a browser.
+
 ## 0.1.12 • 18/nov/2026
 
 - **Alpha-Aware Stack Cut for Images (`2100-resolutor-capas.js`):**
-  - Image layers (`<img>` and `background-image`) now carry `nocut` unless the format is JPEG, read from the file extension or the `data:image/<subtype>` prefix. Previously every image layer with element opacity 1 cut the layer stack below it, so the transparent pixels of PNG, WebP, SVG or GIF were composited over the page base color instead of the content actually underneath. A URL with no extension (CDN, `/photo?id=3`) counts as non-JPEG.
+  - Image layers (`<img>` and `background-image`) now carry `nocut` unless the format is JPEG, read from the file extension or the `data:image/<subtype>` prefix. Previously every image layer with element opacity 1 cut the layer stack below it, so the transparent pixels of PNG, WebP, SVG or GIF were composited over the page base color instead of the content actually underneath. A URL with no extension (e.g. `/photo?id=3`) counts as non-JPEG.
 - **Veil for Animated GIF (`2100-resolutor-capas.js`):**
   - A `.gif` file (or `data:image/gif`) used as `<img>` or `background-image` is now marked unknown with reason `animated image`, so it receives the translucent veil. Previously the engine drew only its first frame. Not detected: GIFs served from `blob:` URLs without an extension, animated PNG, animated WebP and animated AVIF.
 - **Veil for `<video>` (`2100-resolutor-capas.js`):**
@@ -12,33 +27,31 @@
 
 ## 0.1.11 • 17/nov/2026
 
-- **Starvation-Free Round-Robin Frame Scheduler (`0200-orquestador.js`):**
-  - Orders dirty records by last render timestamp (`renderedAt`) while preserving `z-index` and DOM paint order locally between overlapping boxes (`rectsOverlap`), preventing lower-order visible boxes from starving when continuous animations invalidate more elements than fit within `config.frameBudgetMs` (`12 ms`).
-  - Resets `renderedAt = 0` when `image-loaded` reopens records flagged with `rec.waitImg`, prioritizing freshly decoded high-resolution images on the next frame.
-- **Per-Element `--ipax-backdrop-cellsize` Wiring (`0200-orquestador.js`):**
-  - Uses each element's resolved `params.cellSize` (falling back to `config.cellSize`) when computing the adaptive DOM probe grid step, enabling independent probe granularity overrides via CSS custom properties.
-- **Performance Benchmark Suite (`examples/performance-longpage.php`, `examples/performance-motion.html`):**
-  - Renamed the existing 400-element stress test (`performance-test.php`) to `examples/performance-longpage.php`, introducing optional background panning and image swapping workloads.
-  - Adds a new benchmark (`examples/performance-motion.html`) testing simultaneous vs. isolated presets, text mutations, box motion, and CSS cross-fade desync behavior.
-  - Shared HUD telemetry, pan/swap timing, an extensible top-level benchmark selector, and a native `<dialog>` background image pool manager (`examples/js/performance-common.js`) supporting both generated textures and local user-uploaded images via zero-copy `blob:` URLs.
+- **Fair frame scheduling under heavy animation:**
+  - Dirty elements are now ordered by last render timestamp while preserving local `z-index` and DOM paint order between overlapping boxes. Previously, continuous animations that exceeded the 12 ms frame budget could starve lower-order boxes.
+  - Elements waiting on a high-resolution image (`waitImg`) jump to the front of the queue as soon as the image decodes.
+- **Per-element probe resolution via CSS:**
+  - Added `--ipax-backdrop-cellsize` support so individual elements can override the global DOM probe grid step through CSS custom properties.
+- **Motion and long-page benchmark suite (`examples/`):**
+  - Renamed the 400-element stress test to `examples/performance-longpage.php` with optional background panning and image swapping, and added `examples/performance-motion.php` to measure isolated vs. simultaneous presets, text mutations, box motion, and CSS cross-fade desync.
+  - Both benchmarks share a live HUD and a `<dialog>` background pool manager supporting procedural textures and local user images via `blob:` URLs.
 
 
 ## 0.1.10 • 16-17/nov/2026
-
-- **Decoupled Dual-Family CSS API (`--ipax-backdrop`, `--ipax-text`, `--ipax-mode`):**
-  - Splits container contrast/blur (`--ipax-backdrop`) and glyph-contour contrast/blur (`--ipax-text`) into independent, composable CSS families with shorthand + longhand cascade support and a shared `--ipax-mode` (`default | tricontrast`) property.
-  - Supports explicit WCAG ratios (`4.5` or `4.5:1`) as well as APCA `Lc` inputs (`90Lc` or bare numbers `> 15`), emitting a `warning` and applying a perceptual power-law WCAG fallback (`1..15:1`, anchored to `#272727` black-level saturation) until APCA licensing is enabled.
-- **Calibrated Per-Word Glyph Contour Mask (`--ipax-text`):**
-  - Replaces the rectangular line-box halo of `0.1.06` with a glyph-fitted mask rasterized per word via `Range.getClientRects()`, `TextMetrics` width/baseline calibration, and `devicePixelRatio` scaling, eliminating hard boxes around text.
-  - Supports `x` and `y` offsets, `halo` diffusion radius, dual-unit `spread` (`%` internal plateau within `halo` or `px` additive dilation outside `halo` like `box-shadow`), and per-glyph background image `blur`.
-- **Unified Single-Pass Blur & Sequential OKLab Composition:**
-  - Composes container mask $M_b$ and glyph mask $M_g$ via screen union $M_{\text{screen}} = M_b + M_g - M_b M_g$, executes a single background blur pass at $R_{\max} = \max(\text{box-blur}, \text{text-blur})$, and transitions lightness continuously $L_0 \xrightarrow{M_{\text{screen}}} L_1 \xrightarrow{M_g} L_2$ across both CPU (`3100`) and WebGL (`3200`/`3210`) kernels.
-  - Short-circuits container distance math and outside-glyph pixel work when `--ipax-backdrop` is inactive (`--ipax-text`-only mode).
-- **Coarse-to-Fine 3×3 Hierarchical Probing & Scroll Convergence (`2000-resolutor.js`, `0200-orquestador.js`):**
-  - Evaluates a 3×3 coarse grid (9 samples) across the active region before subdividing into `probeBlock` × `probeBlock` blocks (using 4 shared corner probes per block instead of 5), scales `localStep` smoothly on large elements, and memoizes `ownerRecord` and `position: fixed` ancestor checks per resolve.
-  - Excludes `position: fixed` overlays above the element's `z-index` from hit-testing and adds a 130 ms `scrollEndTimer` flush so throttled boxes converge cleanly once scrolling stops.
-- **Lucid Glass Editor Inspector Refinement (`examples/editor.html`):**
-  - Adds a single-row `Position` (`X`, `Y`, `W`, `H`) panel, collapsible panel carets, independent enable/collapse toggles for `Container (--ipax-backdrop)` and `Glyph Contour (--ipax-text)`, Material Symbols iconography with font load-source status, horizontal label scrubbing, and instant delegated tooltips.
+_The jump in version number reflects the depth of rendering and API changes_
+- **Independent container and glyph-contour CSS API (`--ipax-backdrop`, `--ipax-text`, `--ipax-mode`):**
+  - Split container contrast/blur (`--ipax-backdrop`) and text-contour contrast/blur (`--ipax-text`) into separate CSS families with shorthand and longhand cascade support, sharing `--ipax-mode` (`default` and `tricontrast`).
+  - Added APCA `Lc` input parsing (`90Lc` or bare numbers `> 15`), emitting a `warning` and mapping to an equivalent WCAG 2 ratio (`1..15:1`) until native APCA licensing is enabled.
+- **Per-word glyph contour mask (`--ipax-text`):**
+  - Replaced the rectangular line-box halo of `0.1.06` with a glyph-fitted mask measured per word via `Range.getClientRects()` and `TextMetrics`, eliminating hard boxes around text.
+  - Supports `x`/`y` offsets, `halo` diffusion radius, dual-unit `spread` (`%` plateau inside `halo` or `px` dilation outside `halo`), and per-glyph background `blur`.
+- **Single-pass blur and sequential OKLab solving:**
+  - Container mask `M_b` and glyph mask `M_g` combine via screen union (`M_b + M_g - M_b * M_g`), run one shared blur pass at `max(box-blur, text-blur)`, and transition lightness `L0 -> L1 -> L2` across both CPU and WebGL backends.
+  - Short-circuits container math and outside-glyph pixel work when `--ipax-backdrop` is inactive (`--ipax-text`-only mode).
+- **Coarse-to-fine DOM probing and scroll convergence:**
+  - Evaluates a 3×3 coarse grid across the active region before subdividing into blocks, ignores `position: fixed` overlays above the element's `z-index`, and flushes throttled boxes 130 ms after scrolling stops.
+- **Lucid Glass editor inspector updates:**
+  - Added a `Position` (`X`, `Y`, `W`, `H`) panel, collapsible sections, independent toggles for `--ipax-backdrop` and `--ipax-text`, font load-source status icons, horizontal label scrubbing, and delegated tooltips.
 
 ## 0.1.06 • 15/nov/2026
 
@@ -106,32 +119,17 @@
 
 ## 0.1.04 • 13/nov/2026
 
-- **Dynamic Performance-Driven Frame Budget (Dual-Clock Controller):**
-  - Replaces the static pixel cap (maxPixels: 60000) with an adaptive per-element resolution controller.
-  - Authors set the minimum acceptable pixel floor via --ipax-backdrop-budget-min (or config.minBudget, default 65536), and the orchestrator dynamically stretches working resolution up to min(maxPixelScale, devicePixelRatio) to maximize visual quality within the target frame time (1000 / performance) / visibleCount.
-  - Tracks fixed DOM probing time (probeMs in resolver) and variable pixel throughput (px/ms) via separate exponential moving averages (EMAs), preventing fixed DOM overhead from collapsing resolution down to minBudget.
-  - Exposes the resolved per-frame budget { s, w, h } in the ipax-backdrop:updated event payload.
-- **Viewport-Aware Scheduling (IntersectionObserver):**
-  - Replaces the global scroll listener with an IntersectionObserver, processing and dividing the frame time budget strictly across elements visible in or approaching the viewport.
-- **Expanded CSS Configuration API:** Engine configuration can now be controlled and overridden per element via CSS custom properties honoring the cascade:
-  - --ipax-backdrop-performance: target frame rate in fps (e.g., 60fps, 60, or 0 / none / infinite to disable adaptive scaling; default 60).
-  - --ipax-backdrop-budget-min: minimum pixel budget floor (default 65536: 256 x 256).
-  - --ipax-backdrop-backend: per-element rendering backend override (auto, webgl, cpu).
-  - --ipax-backdrop-cellsize: DOM probe grid step in pixels (default 12).
-  - --ipax-backdrop-maxpixelscale: upper pixel scale multiplier relative to devicePixelRatio (default 2).
-- **Resolver, Blur & CPU Kernel Parity Improvements:**
-  - Snaps canvas translation to integer coordinates (-Math.round(R.left), -Math.round(R.top)) when rendering at native 1:1 scale (s === 1) to avoid sub-pixel resampling blur.
-  - Configures willReadFrequently: true on internal 2D estimation and blur canvases to accelerate frequent getImageData readbacks.
-  - Fixes kernel-cpu bypass mode (contrast <= 1) to zero out unknown-area veil opacity, matching WebGL shader output in pure linear-blur mode.
-- **Lucid Glass Editor (examples/editor.html) & Stress Test:**
-  - Complete visual editor built on a modular JS/CSS architecture with a contextual inspector.
-  - Multi-box layout controls: create, drag, 8-handle resize, Alt+Drag / button duplication, z-index stacking, and border guides toggle.
-  - Real-time per-box controls for mode (default / tricontrast), contrast, blur, and grouped/individual TRBL feathering.
-  - Unified Stage and Box background system supporting Solid Colors, Gradients, and Images (drag-and-drop, fit modes, box opacity).
-  - Inline rich-text formatting, horizontal/vertical alignment, TRBL padding, system font stacks, and on-demand Google Fonts loading (restored automatically with saved projects).
-  - Zero-Base64 binary image pipeline (Blob + ObjectURL deduplication), IndexedDB auto-save with storage footprint footer (Purge / Reset), .zip project packaging, and PNG stage export (lucid-glass-stage.png, with Region Capture detection and non-Chromium warning).
-  - Added 400-element viewport stress test (examples/performance-test.php with static HTML caching and shared texture pool in examples/js/example-images.js) and live telemetry HUD.
-  - **Examples**: Harmonic palettes used for procedural texture generation preview the upcoming *IPAX Color System Builder* project.
+- **Adaptive resolution controller:**
+  - Replaced the static `maxPixels` cap with a per-element resolution scaler driven by `--ipax-backdrop-performance` (target FPS) and `--ipax-backdrop-budget-min` (minimum pixel floor, default 65536). Working resolution scales up toward `devicePixelRatio` while staying within frame budget, tracking fixed DOM probe time separately from pixel throughput.
+- **Viewport-aware scheduling:**
+  - Replaced the global scroll listener with an `IntersectionObserver` so off-screen elements do not consume frame budget.
+- **CSS custom property configuration:**
+  - Added `--ipax-backdrop-performance`, `--ipax-backdrop-budget-min`, `--ipax-backdrop-backend`, `--ipax-backdrop-cellsize`, and `--ipax-backdrop-maxpixelscale` so engine settings follow the CSS cascade per element.
+- **Sub-pixel alignment and bypass parity:**
+  - Snapped canvas translation to integer coordinates at 1:1 scale to prevent resampling softness, enabled `willReadFrequently: true` on 2D canvases, and zeroed out the unknown-area veil in CPU bypass mode (`contrast <= 1`) to match WebGL.
+- **Lucid Glass editor and 400-box stress test (`examples/`):**
+  - Added the visual editor with multi-box layout, TRBL feathering, rich text, Google Fonts loading, binary image deduplication in IndexedDB, `.zip` project export/import, and PNG stage capture.
+  - Added the 400-element viewport stress test with static HTML caching and procedural textures previewing the upcoming *IPAX Color System Builder* palettes.
 
 ## 0.1.03 • 11/nov/2026
 
@@ -180,4 +178,4 @@
 
 ---
 
-_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.12 • 2026-11-18 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_
+_IPAX Backdrop & IPAX Text (Lucid Glass) v0.1.13 • 2026-11-21 • Santiago Bustelo • [Apache 2.0 / CC BY 4.0 License](LICENSE)_

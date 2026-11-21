@@ -5,7 +5,7 @@
  * CHAPTER 9 - PUBLIC API. The only service meant for library users.
  *
  *   const api = window.j0.get('ipax-backdrop');
- *   api.version      '0.1.10'
+ *   api.version      '0.1.13'
  *   api.config       live configuration object
  *   api.start()      scan the page and start (done automatically unless config.autoStart is false)
  *   api.stop()       remove every layer and stop
@@ -19,7 +19,7 @@
 	const svc = (n) => window.j0.get('ipax-backdrop:' + n);
 
 	const api = {
-		version: '0.1.12',
+		version: '0.1.13',
 		start: () => svc('orchestrator').start(),
 		stop: () => svc('orchestrator').stop(),
 		refresh: () => svc('orchestrator').refresh(),
